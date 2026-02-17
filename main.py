@@ -1,10 +1,11 @@
 import asyncio
 import discord
 import sys
+import os
 from pathlib import Path
 
-# This adds the 'src' folder to the list of places Python looks for code.
-# It allows 'from utils.config import Config' to work correctly.
+# Professional Bootstrap: Add 'src' to the system path
+# This allows 'from utils.config import Config' to work from anywhere
 SRC_PATH = str(Path(__file__).resolve().parent / "src")
 if SRC_PATH not in sys.path:
     sys.path.insert(0, SRC_PATH)
@@ -12,6 +13,7 @@ if SRC_PATH not in sys.path:
 from utils.config import Config
 from utils.logger import get_logger
 from utils.reporter import Reporter
+from database.database import DatabaseManager
 from api.monitor import MBTAMonitor
 from interfaces.bot import WatchdogBot
 
@@ -48,22 +50,19 @@ async def process_alerts(bot, current_data):
     for tid in list(alert_history.keys()):
         if tid not in active_ids: del alert_history[tid]
 
-async def monitor_loop(bot):
-    monitor = MBTAMonitor()
-    reporter = Reporter()
+async def monitor_loop(monitor, reporter, bot):
+    """Main background task for polling and analysis."""
     log.info("Starting Monitor Loop...")
-    await asyncio.sleep(5) # Let bot connect
-
     while True:
         try:
             # 1. Fetch & Save
             data = await monitor.fetch_data()
             monitor.save_data(data)
 
-            # 2. Alerts
+            # 2. Process Proactive Alerts
             await process_alerts(bot, data)
 
-            # 3. Report & IoT
+            # 3. Report & IoT Update
             hist = reporter.get_recent_history(60)
             txt = reporter.generate_email(hist)
             await reporter.push_to_thingspeak(data, txt)
@@ -73,22 +72,30 @@ async def monitor_loop(bot):
         
         await asyncio.sleep(Config.POLL_INTERVAL_SECONDS)
 
-def main():
+async def main():
+    # 1. Initialize Shared Resource (Dependency Injection Pattern)
+    shared_db = DatabaseManager()
+    
+    # 2. Inject Shared DB into all dependent components
+    monitor = MBTAMonitor(db_manager=shared_db)
+    reporter = Reporter(db_manager=shared_db)
+    
     intents = discord.Intents.default()
     intents.message_content = True
-    bot = WatchdogBot(intents=intents)
+    bot = WatchdogBot(db_manager=shared_db, intents=intents)
 
-    # Schedule Monitor as Background Task
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+    # 3. Start the Background Task
+    # Note: bot.start is blocking, so we schedule the monitor first
+    asyncio.create_task(monitor_loop(monitor, reporter, bot))
     
-    loop.create_task(monitor_loop(bot))
-    
-    log.info("Starting Bot...")
+    log.info("Starting Discord Interface...")
     try:
-        loop.run_until_complete(bot.start(Config.DISCORD_TOKEN))
+        await bot.start(Config.DISCORD_TOKEN)
     except KeyboardInterrupt:
         log.info("Shutting down.")
 
 if __name__ == "__main__":
-    main()
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass

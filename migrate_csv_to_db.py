@@ -1,12 +1,18 @@
 import pandas as pd
 import os
-import sqlite3
-from config import Config
-from database import DatabaseManager
+import sys
+from pathlib import Path
+
+# Bootstrap path
+SRC_PATH = str(Path(__file__).resolve().parent / "src")
+if SRC_PATH not in sys.path:
+    sys.path.insert(0, SRC_PATH)
+
+from utils.config import Config
+from database.database import DatabaseManager
 
 def migrate():
     # 1. DEFINE PATHS
-    # We look for the CSV in the 'data' folder
     csv_file = os.path.join("data", "mbta_worcester_log.csv")
     
     if not os.path.exists(csv_file):
@@ -24,25 +30,20 @@ def migrate():
         return
 
     # 3. CLEAN DATA (Handle Missing Columns)
-    # If your old CSV didn't have 'Station', fill it with 'Unknown'
     if 'Station' not in df.columns:
         df['Station'] = 'Unknown'
 
     # 4. INITIALIZE DB
     print("⚙️  Initializing Database...")
-    db = DatabaseManager() # Uses Config.DB_FILE (data/mbta_logs.db)
+    db = DatabaseManager() 
     
     # 5. INSERT DATA
     print("🚀 Migrating records to SQLite...")
     try:
-        # The insert_data method expects columns: LogTime, Train, Status, DelayMinutes, Station
-        # It handles the renaming to lowercase DB columns automatically.
         db.insert_data(df)
-        
         print("✅ Migration Complete!")
         print(f"   New Database: {Config.DB_FILE}")
         print("   You can now archive or delete the old CSV file.")
-        
     except Exception as e:
         print(f"❌ Migration Failed: {e}")
 

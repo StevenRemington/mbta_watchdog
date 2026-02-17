@@ -8,19 +8,30 @@ from utils.logger import get_logger
 log = get_logger("Database")
 
 class DatabaseManager:
-    def __init__(self):
-        self.db_path = Config.DB_FILE
+    def __init__(self, db_path=None):
+        """
+        Initializes the DB manager.
+        :param db_path: Path to SQLite file. Defaults to Config.DB_FILE.
+                        Pass ':memory:' for unit tests.
+        """
+        self.db_path = db_path or Config.DB_FILE
+        
+        # Log the database path being used
+        if self.db_path == ":memory:":
+            log.warning("⚠️ Using IN-MEMORY database. Data will not be persisted.")
+        else:
+            log.info(f"✅ Using database file at: {self.db_path}")
+            
         self._init_db()
 
     def _get_conn(self):
         return sqlite3.connect(self.db_path)
 
     def _init_db(self):
-        """Creates table and indexes."""
+        """Creates table and indexes if they don't exist."""
         conn = self._get_conn()
         cursor = conn.cursor()
         
-        # Create table with direction column
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS train_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -33,11 +44,11 @@ class DatabaseManager:
             )
         ''')
         
-        # MIGRATION: Attempt to add the column if it's missing (for existing DBs)
+        # Migration: Add direction column if missing
         try:
             cursor.execute("ALTER TABLE train_logs ADD COLUMN direction TEXT")
         except sqlite3.OperationalError:
-            pass # Column likely already exists
+            pass 
             
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_log_time ON train_logs (log_time)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_train_id ON train_logs (train_id)')
@@ -48,11 +59,9 @@ class DatabaseManager:
     def insert_data(self, df):
         if df.empty: return
 
-        # Ensure 'Direction' exists in the incoming data
         if 'Direction' not in df.columns:
             df['Direction'] = 'UNK'
 
-        # Rename columns to match DB Schema
         records = df.rename(columns={
             "LogTime": "log_time",
             "Train": "train_id", 
@@ -76,12 +85,9 @@ class DatabaseManager:
         conn.close()
         
         return df.rename(columns={
-            "log_time": "LogTime",
-            "train_id": "Train",
-            "status": "Status",
-            "delay_minutes": "DelayMinutes",
-            "station": "Station",
-            "direction": "Direction"
+            "log_time": "LogTime", "train_id": "Train",
+            "status": "Status", "delay_minutes": "DelayMinutes",
+            "station": "Station", "direction": "Direction"
         })
 
     def get_train_history(self, train_id, days=7):
@@ -93,10 +99,7 @@ class DatabaseManager:
         conn.close()
         
         return df.rename(columns={
-            "log_time": "LogTime",
-            "train_id": "Train",
-            "status": "Status",
-            "delay_minutes": "DelayMinutes",
-            "station": "Station",
-            "direction": "Direction"
+            "log_time": "LogTime", "train_id": "Train",
+            "status": "Status", "delay_minutes": "DelayMinutes",
+            "station": "Station", "direction": "Direction"
         })

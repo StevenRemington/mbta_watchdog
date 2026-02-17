@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Resolves to the 'mbta_watchdog' root folder
-ROOT_DIR = Path(__file__).resolve().parent.parent.parent.parent
+ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 
 class Config:
     DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")

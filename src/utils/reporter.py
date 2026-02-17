@@ -8,8 +8,8 @@ from .config import Config
 log = get_logger("Reporter")
 
 class Reporter:
-    def __init__(self):
-        self.db = DatabaseManager()
+    def __init__(self, db_manager=None):
+        self.db = db_manager or DatabaseManager()
 
     def get_recent_history(self, minutes=60):
         return self.db.get_recent_logs(minutes=minutes)
@@ -78,7 +78,7 @@ class Reporter:
 
     async def push_to_thingspeak(self, current_data, email_text):
         """Uploads metrics to ThingSpeak dashboard."""
-        if current_data.empty: return
+        if current_data.empty or not Config.THINGSPEAK_API_KEY: return
 
         late_trains = current_data[current_data['DelayMinutes'] > Config.DELAY_THRESHOLD]
         late_count = len(late_trains)

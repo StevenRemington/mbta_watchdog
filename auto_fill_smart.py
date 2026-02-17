@@ -8,7 +8,10 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
-from config import Config
+
+# Need to append src to path to import Config
+sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
+from utils.config import Config
 
 def get_rounded_time():
     now = datetime.now()
