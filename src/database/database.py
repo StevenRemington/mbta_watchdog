@@ -1,8 +1,9 @@
 import sqlite3
 import pandas as pd
 from datetime import datetime, timedelta
-from config import Config
-from logger import get_logger
+
+from utils.config import Config
+from utils.logger import get_logger
 
 log = get_logger("Database")
 

@@ -3,7 +3,8 @@ import os
 import subprocess
 import pandas as pd
 from datetime import datetime
-from database import DatabaseManager
+
+from database.database import DatabaseManager
 
 from utils.config import Config
 from utils.logger import get_logger

@@ -1,7 +1,8 @@
 import pandas as pd
 import aiohttp
 from datetime import datetime
-from database import DatabaseManager
+
+from database.database import DatabaseManager
 
 from utils.config import Config
 from utils.logger import get_logger

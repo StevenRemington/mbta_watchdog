@@ -34,7 +34,7 @@ mbta_watchdog/
 ├── logs/               # Application runtime logs
 ├── src/                # Modular Source Code
 │   ├── api/            # MBTA API monitoring & data ingestion
-│   ├── discord/        # Bot logic, commands, and alert systems
+│   ├── interfaces/        # Bot logic, commands, and alert systems
 │   ├── database/       # SQLite schema & persistence logic
 │   └── utils/          # Config, Logger, and Reporting helpers
 ├── main.py             # Application Orchestrator

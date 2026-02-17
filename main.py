@@ -3,14 +3,17 @@ import discord
 import sys
 from pathlib import Path
 
-# Add 'src' to system path to allow 'from api.monitor import ...'
-sys.path.append(str(Path(__file__).resolve().parent / "src"))
+# This adds the 'src' folder to the list of places Python looks for code.
+# It allows 'from utils.config import Config' to work correctly.
+SRC_PATH = str(Path(__file__).resolve().parent / "src")
+if SRC_PATH not in sys.path:
+    sys.path.insert(0, SRC_PATH)
 
-from config import Config
-from logger import get_logger
-from monitor import MBTAMonitor
-from reporter import Reporter
-from bot import WatchdogBot
+from utils.config import Config
+from utils.logger import get_logger
+from utils.reporter import Reporter
+from api.monitor import MBTAMonitor
+from interfaces.bot import WatchdogBot
 
 log = get_logger("Main")
 alert_history = {} # Track sent alerts to avoid spam

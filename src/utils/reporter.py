@@ -2,7 +2,8 @@ import pandas as pd
 import aiohttp
 from datetime import datetime
 from database.database import DatabaseManager
-from .config import Config # Note: '.' works here as they are in the same folder
+from .logger import get_logger # Note: '.' works here as they are in the same folder
+from .config import Config 
 
 log = get_logger("Reporter")
 

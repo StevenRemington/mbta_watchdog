@@ -13,7 +13,7 @@ The application is orchestrated by a central **asyncio event loop** in `main.py`
 1. **Data Ingestion (`src/api/`):** Manages external communication with the MBTA v3 API.
 2. **Persistence Layer (`src/database/`):** Encapsulates SQLite schema and query logic.
 3. **Analysis Engine (`src/utils/reporter.py`):** Performs historical performance audits.
-4. **Interface Layer (`src/discord/`):** Handles Discord gateway interactions and proactive alerts.
+4. **Interface Layer (`src/interfaces/`):** Handles Discord gateway interactions and proactive alerts.
 5. **Automation Layer (`root/auto_fill_smart.py`):** Uses Selenium for browser-based task automation.
 
 ---
