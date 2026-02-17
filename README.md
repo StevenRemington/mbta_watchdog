@@ -42,3 +42,92 @@ mbta_watchdog/
 ├── logger.py             # Logging Utility
 └── data/                 # Folder for Database & Logs
     └── mbta_logs.db      # The SQLite Database (Auto-created)
+
+```
+
+---
+
+## 🚀 Installation
+
+### 1. Clone & Setup
+
+```bash
+git clone [https://github.com/yourusername/mbta_watchdog.git](https://github.com/yourusername/mbta_watchdog.git)
+cd mbta_watchdog
+
+# Optional: Create virtual env
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+
+```
+
+### 2. Install Dependencies
+
+```bash
+pip install -r requirements.txt
+
+```
+
+### 3. Configure Secrets
+
+Create a `.env` file in the root directory:
+
+```ini
+# .env
+DISCORD_TOKEN=your_bot_token_here
+THINGSPEAK_API_KEY=your_write_key
+MBTA_API_KEY=your_mbta_key (Optional)
+DISCORD_ALERT_CHANNEL_ID=123456789012345678  # Channel ID for Red Alerts
+
+```
+
+### 4. (Optional) Migrate Old Data
+
+If you have an old `mbta_worcester_log.csv` file, move it to the `data/` folder and run:
+
+```bash
+python migrate_csv_to_db.py
+
+```
+
+---
+
+## ⚙️ Usage
+
+### Start the Watchdog
+
+```bash
+python main.py
+
+```
+
+The system will initialize the database, start the monitoring loop, and log the bot into Discord.
+
+### Discord Commands
+
+| Command | Description |
+| --- | --- |
+| **`!list`** | Live board of active trains (ID, Direction, Status, Delay). |
+| **`!status`** | Shows the current generated email draft (Complaint or All Clear). |
+| **`!status <ID>`** | Detailed history for a specific train (e.g., `!status 508`). |
+| **`!copy`** | **Mobile:** Sends the complaint text in a copy-paste friendly format + Link. |
+| **`!launch`** | **Desktop:** Opens Chrome on the host machine and auto-fills the MBTA form. |
+| **`!help`** | Shows the help menu. |
+
+---
+
+## 🛠️ Configuration (`config.py`)
+
+You can tune the sensitivity of the watchdog:
+
+* **`POLL_INTERVAL_SECONDS`**: Frequency of checks (Default: `120s`).
+* **`DELAY_THRESHOLD`**: Minutes before a train is marked "Yellow/Late" (Default: `5m`).
+* **`MAJOR_DELAY_THRESHOLD`**: Minutes before a "Red Alert" is sent to Discord (Default: `20m`).
+
+---
+
+## 📝 License
+
+MIT License.
+
+```
