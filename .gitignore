@@ -1,0 +1,27 @@
+# --- Secrets (CRITICAL) ---
+.env
+.env.local
+
+# --- Python System Files ---
+__pycache__/
+*.pyc
+
+# --- Virtual Environment ---
+venv/
+env/
+.venv/
+
+# --- Data & Logs ---
+data/*.db
+data/*.csv
+data/*.txt
+data/*.log
+*.log
+
+# --- OS Files ---
+.DS_Store
+Thumbs.db
+
+# --- IDE Settings (Optional) ---
+.vscode/
+.idea/
