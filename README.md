@@ -129,5 +129,3 @@ You can tune the sensitivity of the watchdog:
 ## 📝 License
 
 MIT License.
-
-```
