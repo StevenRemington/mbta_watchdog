@@ -1,5 +1,11 @@
 import asyncio
 import discord
+import sys
+from pathlib import Path
+
+# Add 'src' to system path to allow 'from api.monitor import ...'
+sys.path.append(str(Path(__file__).resolve().parent / "src"))
+
 from config import Config
 from logger import get_logger
 from monitor import MBTAMonitor

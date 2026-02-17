@@ -30,19 +30,16 @@ A production-grade, asynchronous Python application that monitors the **MBTA Fra
 
 ```text
 mbta_watchdog/
-├── .env                  # API Keys (Do NOT commit this)
-├── requirements.txt      # Dependencies
-├── main.py               # Orchestrator (Runs Monitor + Bot)
-├── database.py           # SQLite Database Manager
-├── monitor.py            # MBTA API Data Fetcher
-├── bot.py                # Discord Bot & Command Dispatcher
-├── reporter.py           # Email Logic & History Analysis
-├── auto_fill_smart.py    # Selenium Browser Automation Script
-├── config.py             # Configuration Loader
-├── logger.py             # Logging Utility
-└── data/                 # Folder for Database & Logs
-    └── mbta_logs.db      # The SQLite Database (Auto-created)
-
+├── data/               # SQLite database & auto-generated drafts
+├── logs/               # Application runtime logs
+├── src/                # Modular Source Code
+│   ├── api/            # MBTA API monitoring & data ingestion
+│   ├── discord/        # Bot logic, commands, and alert systems
+│   ├── database/       # SQLite schema & persistence logic
+│   └── utils/          # Config, Logger, and Reporting helpers
+├── main.py             # Application Orchestrator
+├── requirements.txt    # Project dependencies
+└── .env                # Private Secrets (Ignored by Git)
 ```
 
 ---

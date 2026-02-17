@@ -1,9 +1,8 @@
 import pandas as pd
 import aiohttp
 from datetime import datetime
-from config import Config
-from logger import get_logger
-from database import DatabaseManager
+from database.database import DatabaseManager
+from .config import Config # Note: '.' works here as they are in the same folder
 
 log = get_logger("Reporter")
 

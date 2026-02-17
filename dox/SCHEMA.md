@@ -3,11 +3,6 @@
 ## Overview
 The application uses **SQLite** for data storage. The database file is located at `data/mbta_logs.db`.
 
-
-
-[Image of relational database schema diagram]
-
-
 ## Tables
 
 ### `train_logs`
@@ -37,6 +32,7 @@ Indexes are critical for the performance of the "Receipt Keeper" and History fun
 
 ### 1. Recent Activity (Dashboard/Discord List)
 Used to generate the live board of trains.
+
 ```sql
 SELECT * FROM train_logs 
 WHERE log_time >= datetime('now', '-30 minutes');

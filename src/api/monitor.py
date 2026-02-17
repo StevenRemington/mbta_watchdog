@@ -1,9 +1,10 @@
 import pandas as pd
 import aiohttp
 from datetime import datetime
-from config import Config
-from logger import get_logger
 from database import DatabaseManager
+
+from utils.config import Config
+from utils.logger import get_logger
 
 log = get_logger("Monitor")
 

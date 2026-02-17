@@ -3,9 +3,10 @@ import os
 import subprocess
 import pandas as pd
 from datetime import datetime
-from config import Config
-from logger import get_logger
 from database import DatabaseManager
+
+from utils.config import Config
+from utils.logger import get_logger
 
 log = get_logger("Bot")
 
