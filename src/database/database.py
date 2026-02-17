@@ -15,6 +15,7 @@ class DatabaseManager:
                         Pass ':memory:' for unit tests.
         """
         self.db_path = db_path or Config.DB_FILE
+        self._persistent_conn = None # For :memory: databases
         
         # Log the database path being used
         if self.db_path == ":memory:":
@@ -25,7 +26,21 @@ class DatabaseManager:
         self._init_db()
 
     def _get_conn(self):
-        return sqlite3.connect(self.db_path)
+        """
+        Returns a database connection.
+        If using :memory:, returns the SAME connection every time to preserve state.
+        """
+        if self.db_path == ":memory:":
+            if self._persistent_conn is None:
+                self._persistent_conn = sqlite3.connect(self.db_path)
+            return self._persistent_conn
+        else:
+            return sqlite3.connect(self.db_path)
+
+    def _close_conn(self, conn):
+        """Closes connection ONLY if it's not the persistent in-memory one."""
+        if self.db_path != ":memory:":
+            conn.close()
 
     def _init_db(self):
         """Creates table and indexes if they don't exist."""
@@ -54,7 +69,7 @@ class DatabaseManager:
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_train_id ON train_logs (train_id)')
         
         conn.commit()
-        conn.close()
+        self._close_conn(conn)
 
     def insert_data(self, df):
         if df.empty: return
@@ -73,7 +88,7 @@ class DatabaseManager:
         
         conn = self._get_conn()
         records.to_sql('train_logs', conn, if_exists='append', index=False)
-        conn.close()
+        self._close_conn(conn)
         log.info(f"Inserted {len(records)} rows into DB.")
 
     def get_recent_logs(self, minutes=60):
@@ -82,7 +97,7 @@ class DatabaseManager:
         
         conn = self._get_conn()
         df = pd.read_sql_query(query, conn, params=(cutoff,))
-        conn.close()
+        self._close_conn(conn)
         
         return df.rename(columns={
             "log_time": "LogTime", "train_id": "Train",
@@ -96,7 +111,7 @@ class DatabaseManager:
         
         conn = self._get_conn()
         df = pd.read_sql_query(query, conn, params=(train_id, cutoff))
-        conn.close()
+        self._close_conn(conn)
         
         return df.rename(columns={
             "log_time": "LogTime", "train_id": "Train",

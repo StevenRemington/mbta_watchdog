@@ -2,4 +2,9 @@ discord.py
 pandas
 aiohttp
 python-dotenv
+selenium
+webdriver-manager
 schedule
+requests
+pytest
+pytest-asyncio
