@@ -179,3 +179,57 @@ class DatabaseManager:
                 bad_dates.append(log_date)
                 
         return bad_dates
+    
+    def get_morning_commute_stats(self):
+        """Aggregates stats for the morning rush (6 AM - 10 AM) and assigns a grade."""
+        now = datetime.now()
+        # Define the 6:00 AM to 10:00 AM window for TODAY
+        start_str = now.replace(hour=6, minute=0, second=0, microsecond=0).strftime('%Y-%m-%d %H:%M:%S')
+        end_str = now.replace(hour=10, minute=0, second=0, microsecond=0).strftime('%Y-%m-%d %H:%M:%S')
+        
+        query = "SELECT * FROM train_logs WHERE log_time >= ? AND log_time <= ?"
+        conn = self._get_conn()
+        try:
+            df = pd.read_sql_query(query, conn, params=(start_str, end_str))
+        finally:
+            self._close_conn(conn)
+        
+        if df.empty: 
+            return None
+
+        # Group by Train ID to find the worst status for each unique train
+        daily_trains = df.groupby('train_id').agg({
+            'delay_minutes': 'max',
+            'status': lambda x: 'CANCELED' if 'CANCELED' in x.values else 'ACTIVE'
+        }).reset_index()
+
+        total = len(daily_trains)
+        if total == 0: return None
+
+        # Calculate Metrics
+        late_count = len(daily_trains[daily_trains['delay_minutes'] > Config.DELAY_THRESHOLD])
+        canceled_count = len(daily_trains[daily_trains['status'] == 'CANCELED'])
+        on_time = total - late_count - canceled_count
+        
+        # Grading Logic (Strict Curve)
+        # 90%+ = A, 80% = B, 70% = C, 60% = D, <60% = F
+        score = (on_time / total) * 100
+        if score >= 90: grade = "A"
+        elif score >= 80: grade = "B"
+        elif score >= 70: grade = "C"
+        elif score >= 60: grade = "D"
+        else: grade = "F"
+
+        # Find the Worst Offender
+        max_idx = daily_trains['delay_minutes'].idxmax()
+        worst_train = daily_trains.loc[max_idx]
+
+        return {
+            "date": now.strftime('%Y-%m-%d'),
+            "total": total,
+            "late": late_count,
+            "canceled": canceled_count,
+            "grade": grade,
+            "worst_train": worst_train['train_id'],
+            "worst_delay": worst_train['delay_minutes']
+        }

@@ -27,6 +27,7 @@ class WatchdogState:
     """Holds the runtime state of the application."""
     alert_history: Dict[str, str] = field(default_factory=dict)
     last_summary_date: str = ""
+    last_morning_report_date: str = ""
 
 def initialize_app():
     """Performs startup setup tasks (directories, logging, etc)."""
@@ -100,10 +101,27 @@ async def monitor_loop(monitor, reporter, bot, bsky, db, state: WatchdogState):
             # 2. Reporting
             await reporter.push_to_thingspeak(data) 
 
-            # 3. Daily Summary Logic
+            # 3. Morning Grade Logic (Runs at 10:00 AM) ---
             now = datetime.now()
             today_str = now.strftime('%Y-%m-%d')
-            
+
+            if now.hour == 10 and now.minute <= 5 and state.last_morning_report_date != today_str:
+                log.info("Generating Morning Commute Grade...")
+                morning_stats = db.get_morning_commute_stats()
+                
+                if morning_stats:
+                    # Post to Bluesky
+                    post_url = bsky.post_morning_grade(morning_stats)
+                    
+                    # Post to Discord
+                    description = f"🔗 [View Report on Bluesky]({post_url})" if post_url else "Morning report generated."
+                    grade_color = 0x2ecc71 if morning_stats['grade'] in ['A', 'B'] else 0xe74c3c
+                    await bot.send_alert(f"🌅 Morning Grade: {morning_stats['grade']}", description, grade_color)
+                    
+                    state.last_morning_report_date = today_str
+            # ---------------------------------------------------
+
+            # 4. Daily Summary Logic (Runs at 09:00 PM)
             if now.hour == 21 and now.minute <= 5 and state.last_summary_date != today_str:
                 log.info("Generating Daily Highlight Post...")
                 stats = db.get_daily_summary_stats()

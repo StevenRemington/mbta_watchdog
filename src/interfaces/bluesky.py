@@ -67,6 +67,26 @@ class BlueskyClient:
             log.error(f"Skeet failed: {e}")
             return None
 
+    def post_morning_grade(self, stats):
+        """Formats and posts the morning commute grade."""
+        if not stats or not self.is_logged_in: return None
+        
+        # Select Icon based on Grade
+        grade_map = {"A": "🟢", "B": "🟢", "C": "🟡", "D": "🔴", "F": "💀"}
+        icon = grade_map.get(stats['grade'], "⚪")
+
+        text = (
+            f"🌅 Morning Commute Report ({stats['date']})\n\n"
+            f"{icon} Grade: {stats['grade']}\n"
+            f"🚆 {stats['total']} Trains Ran\n"
+            f"✅ {stats['total'] - stats['late'] - stats['canceled']} On Time\n"
+            f"⚠️ {stats['late']} Late\n"
+            f"🚫 {stats['canceled']} Canceled\n\n"
+            f"🐌 Worst Offender: Train {stats['worst_train']} (+{stats['worst_delay']}m)\n"
+            f"@mbta.com #WorcesterLine #MBTA"
+        )
+        return self.send_skeet(text)
+
     def post_daily_summary(self, stats):
         """Formats and posts the daily highlight summary."""
         if not stats or not self.is_logged_in: return
