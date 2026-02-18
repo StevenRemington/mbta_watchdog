@@ -1,6 +1,7 @@
 import sqlite3
 import pandas as pd
 from datetime import datetime, timedelta
+import threading
 
 from utils.config import Config
 from utils.logger import get_logger
@@ -8,16 +9,36 @@ from utils.logger import get_logger
 log = get_logger("Database")
 
 class DatabaseManager:
+    _instance = None
+    _lock = threading.Lock()
+
+    def __new__(cls, db_path=None):
+        """Thread-safe Singleton implementation."""
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super(DatabaseManager, cls).__new__(cls)
+                    cls._instance._initialized = False
+        return cls._instance
+
     def __init__(self, db_path=None):
+        """
+        Initializes the connection only once.
+        """
+        if self._initialized: return
+        
         self.db_path = db_path or Config.DB_FILE
         self._persistent_conn = None 
         
         if self.db_path == ":memory:":
             log.warning("⚠️ Using IN-MEMORY database. Data will not be persisted.")
         else:
-            log.info(f"✅ Using database file at: {self.db_path}")
+            log.info(f"✅ Database Connection Initialized: {self.db_path}")
             
+        # In a real production app, use Alembic here. 
+        # For this refactor, we still init the schema but only once.
         self._init_db()
+        self._initialized = True
 
     def _get_conn(self):
         if self.db_path == ":memory:":
@@ -29,8 +50,12 @@ class DatabaseManager:
     def _close_conn(self, conn):
         if self.db_path != ":memory:":
             conn.close()
-
+    
     def _init_db(self):
+        """
+        Creates tables. 
+        NOTE: In production, remove this and use Alembic migrations (alembic upgrade head).
+        """
         conn = self._get_conn()
         cursor = conn.cursor()
         cursor.execute('''
@@ -44,6 +69,7 @@ class DatabaseManager:
                 direction TEXT
             )
         ''')
+        # Indexes
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_log_time ON train_logs (log_time)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_train_id ON train_logs (train_id)')
         conn.commit()
@@ -119,7 +145,7 @@ class DatabaseManager:
             "max_train": worst_train['train_id'],
             "max_delay": worst_train['delay_minutes']
         }
-        
+
     def get_failure_stats(self, train_id: str, days: int = 7, delay_threshold: int = 5) -> list:
         """
         Returns a list of dates (str) where the train failed (Late or Canceled).

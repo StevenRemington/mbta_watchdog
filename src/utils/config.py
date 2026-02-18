@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Resolves to the 'mbta_watchdog' root folder (3 levels up from this file)
+# Resolves to the 'mbta_watchdog' root folder
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 
 class Config:
@@ -27,12 +27,9 @@ class Config:
     DRAFT_FILE = str(DATA_DIR / "current_email_draft.txt")
 
     # API & THRESHOLDS
-    MBTA_API_URL = "https://api-v3.mbta.com/"
+    MBTA_API_URL = "https://api-v3.mbta.com" # Removed trailing slash for consistency
     THINGSPEAK_URL = "https://api.thingspeak.com/update"
     POLL_INTERVAL_SECONDS = 120
     DELAY_THRESHOLD = 5
     MAJOR_DELAY_THRESHOLD = 15
-
-    # Ensure directories exist locally
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    
