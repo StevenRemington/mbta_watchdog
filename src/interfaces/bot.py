@@ -1,6 +1,5 @@
 import discord
 import os
-import subprocess
 import pandas as pd
 from datetime import datetime
 from typing import Optional, List, Dict, Any

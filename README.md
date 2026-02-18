@@ -19,7 +19,6 @@ A production-grade, asynchronous Python application that monitors the **MBTA Fra
 ### 3. Advanced Discord Bot
 * **Push Alerts:** Proactively messages a channel if a train is **Canceled** or **Delayed > 20 mins**.
 * **Mobile Friendly:** `!copy` command provides one-tap text blocks for filing complaints on your phone.
-* **Desktop Automation:** `!launch` command remotely opens a Chrome browser on the host machine and **auto-fills** the MBTA Customer Support form (including time/date dropdowns).
 
 ### 4. IoT & Dashboard
 * **ThingSpeak Integration:** Pushes metrics (Late Count, Max Delay) to a cloud dashboard for visualization.

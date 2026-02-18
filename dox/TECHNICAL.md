@@ -14,7 +14,6 @@ The application is orchestrated by a central **asyncio event loop** in `main.py`
 2. **Persistence Layer (`src/database/`):** Encapsulates SQLite schema and query logic.
 3. **Analysis Engine (`src/utils/reporter.py`):** Performs historical performance audits.
 4. **Interface Layer (`src/interfaces/`):** Handles Discord gateway interactions and proactive alerts.
-5. **Automation Layer (`root/auto_fill_smart.py`):** Uses Selenium for browser-based task automation.
 
 ---
 
@@ -33,8 +32,6 @@ The application is orchestrated by a central **asyncio event loop** in `main.py`
 * **Optimization:** * **B-Tree Indexes:** `idx_log_time` and `idx_train_id` ensure that historical "Receipt" lookups remain  even as the database grows to thousands of rows.
 * **Auto-Migration:** Includes `ALTER TABLE` logic to handle schema updates (e.g., adding `direction`) without manual intervention.
 
-
-
 ### 3. The Reporter (`src/utils/reporter.py`)
 
 * **The "Receipt Keeper":** Unlike standard monitors, this component performs a **look-back analysis**. It queries the database for the last 7 days of performance for a specific `train_id`.
@@ -44,7 +41,6 @@ The application is orchestrated by a central **asyncio event loop** in `main.py`
 
 * **Interface:** A `discord.Client` implementation using a **Command Dispatcher** pattern.
 * **Proactive Alerts:** Monitors the telemetry stream for `CANCELED` status or delays exceeding `MAJOR_DELAY_THRESHOLD` (20m), pushing automated embeds to a designated alert channel.
-* **Subprocess Integration:** Uses `subprocess.Popen` to launch the Selenium automation script locally without blocking the main event loop.
 
 ---
 
@@ -78,6 +74,5 @@ The project utilizes a **src-layout** where `main.py` serves as the entry point 
 | --- | --- |
 | **`aiohttp`** | High-performance async HTTP requests. |
 | **`pandas`** | SQL-to-DataFrame bridging and data manipulation. |
-| **`selenium`** | Web browser automation and MBTA form auto-filling. |
 | **`discord.py`** | WebSocket connection to Discord's Real-time Gateway. |
 | **`python-dotenv`** | Decouples sensitive API keys from the source code. |
