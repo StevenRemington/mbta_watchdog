@@ -2,7 +2,7 @@ import pandas as pd
 import aiohttp
 from datetime import datetime
 from database.database import DatabaseManager
-from .logger import get_logger # Note: '.' works here as they are in the same folder
+from .logger import get_logger
 from .config import Config 
 
 log = get_logger("Reporter")
@@ -41,9 +41,9 @@ class Reporter:
                 f"({', '.join(dates)}).")
 
     def generate_email(self, df_recent):
+        """Generates the email draft text and returns it as a string."""
         bad_trains = []
         if not df_recent.empty:
-            # Ensure Train column is string for comparison
             df_recent['Train'] = df_recent['Train'].astype(str)
             for train_id in df_recent['Train'].unique():
                 t_rows = df_recent[df_recent['Train'] == train_id]
@@ -72,12 +72,10 @@ class Reporter:
                     f"Please provide an explanation for these repeated disruptions.\n\n"
                     f"Sincerely,\n[Your Name]")
         
-        with open(Config.DRAFT_FILE, "w", encoding="utf-8") as f:
-            f.write(body)
         return body
 
-    async def push_to_thingspeak(self, current_data, email_text):
-        """Uploads metrics to ThingSpeak dashboard."""
+    async def push_to_thingspeak(self, current_data):
+        """Uploads core metrics to ThingSpeak dashboard, excluding the email text."""
         if current_data.empty or not Config.THINGSPEAK_API_KEY: return
 
         late_trains = current_data[current_data['DelayMinutes'] > Config.DELAY_THRESHOLD]
@@ -91,19 +89,13 @@ class Reporter:
             msgs = [f"Tr{row['Train']} +{row['DelayMinutes']}m" for _, row in late_trains.head(2).iterrows()]
             status_msg = " | ".join(msgs)
 
-        chunks = [email_text[i:i+255] for i in range(0, len(email_text), 255)]
-        while len(chunks) < 4: chunks.append("") 
-
+        # Payload now only includes metrics and status, no longer includes email chunks
         payload = {
             "api_key": Config.THINGSPEAK_API_KEY,
             "field1": total_trains,
             "field2": late_count,
             "field3": max_delay,
-            "status": status_msg,
-            "field5": chunks[0],
-            "field6": chunks[1],
-            "field7": chunks[2],
-            "field8": chunks[3]
+            "status": status_msg
         }
 
         async with aiohttp.ClientSession() as session:

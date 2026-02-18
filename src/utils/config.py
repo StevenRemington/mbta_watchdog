@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Resolves to the 'mbta_watchdog' root folder (4 levels up from this file)
+# Resolves to the 'mbta_watchdog' root folder (3 levels up from this file)
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 
 class Config:

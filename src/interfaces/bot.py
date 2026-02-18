@@ -8,6 +8,7 @@ from typing import Optional, List, Dict, Any
 from dateutil import parser
 
 from database.database import DatabaseManager
+from utils.reporter import Reporter
 from utils.config import Config
 from utils.logger import get_logger
 
@@ -19,21 +20,23 @@ class WatchdogBot(discord.Client):
     Handles user commands and proactive service alerts.
     """
 
-    def __init__(self, db_manager: Optional[DatabaseManager] = None, *args, **kwargs):
+    def __init__(self, db_manager: Optional[DatabaseManager] = None, reporter: Optional[Reporter] = None, *args, **kwargs):
         """
         Initialize the bot with dependency injection.
+        
+        :param db_manager: Database manager for historical queries.
+        :param reporter: Reporter instance for on-demand email draft generation.
         """
         super().__init__(*args, **kwargs)
         self.db = db_manager or DatabaseManager()
+        self.reporter = reporter or Reporter(db_manager=self.db)
         
-        # Command Registry: Maps trigger words to handler methods
+        # Command Registry: Updated to focus on !feedback and enhanced !status
         self.command_map = {
             '!help': self.cmd_help,
             '!list': self.cmd_list,
             '!status': self.cmd_status,
-            '!email': self.cmd_status,  # Alias
-            '!copy': self.cmd_copy,
-            '!launch': self.cmd_launch,
+            '!feedback': self.cmd_feedback,
             '!health': self.cmd_health
         }
 
@@ -73,11 +76,9 @@ class WatchdogBot(discord.Client):
             "**🚆 MBTA Watchdog Help**\n"
             "```\n"
             "!list          : Live board of active trains & locations\n"
-            "!status        : View current complaint email draft\n"
             "!status <num>  : View stats & predictions for a specific train\n"
-            "!health        : Check database connection and recent updates\n"
-            "!copy          : Get mobile-friendly text for complaints\n"
-            "!launch        : Auto-fill the MBTA form (Desktop Only)\n"
+            "!feedback      : Generate a live complaint email draft\n"
+            "!health        : Check system health and database updates\n"
             "```"
         )
         await message.channel.send(help_text)
@@ -98,24 +99,19 @@ class WatchdogBot(discord.Client):
         except Exception as e:
             await message.channel.send(f"❌ **Error:** {e}")
 
-    async def cmd_copy(self, message: discord.Message, args: Optional[str]):
-        """Provides mobile-friendly copy-paste text and link."""
+    async def cmd_feedback(self, message: discord.Message, args: Optional[str]):
+        """Provides mobile-friendly copy-paste text for the MBTA form."""
         await message.channel.send("**1️⃣ Open Form:** https://www.mbta.com/customer-support")
         
-        content = self._read_draft_file()
-        if content:
+        # Fetch the last 60 minutes of history to generate a context-aware draft
+        df = self._get_recent_data(minutes=60)
+        
+        if df is not None:
+            content = self.reporter.generate_email(df)
             await message.channel.send("**2️⃣ Copy Text:**")
             await self._send_chunked_code_block(message.channel, content)
         else:
-            await message.channel.send("⚠️ No email draft found yet.")
-
-    async def cmd_launch(self, message: discord.Message, args: Optional[str]):
-        """Triggers the Selenium automation on the host machine."""
-        if os.path.exists("auto_fill_smart.py"):
-            subprocess.Popen(["python", "auto_fill_smart.py"])
-            await message.channel.send("🚀 Browser Launched on host! Select **'Complaint'** to auto-fill.")
-        else:
-            await message.channel.send("❌ Automation script not found.")
+            await message.channel.send("⚠️ Unable to generate draft: Database history unavailable.")
 
     async def cmd_list(self, message: discord.Message, args: Optional[str]):
         """Displays a live board of all active trains."""
@@ -139,11 +135,21 @@ class WatchdogBot(discord.Client):
         await message.channel.send(response)
 
     async def cmd_status(self, message: discord.Message, args: Optional[str]):
-        """Handles email draft view or specific train lookup."""
+        """Handles specific train lookup. Errors out if no train number is provided."""
         if args:
-            await self._handle_specific_train_status(message, args)
+            await self._handle_specific_train_status(message, args.strip())
         else:
-            await self.cmd_copy(message, args)
+            # Provide error and suggest active trains
+            df = self._get_recent_data(minutes=30)
+            if df is not None and not df.empty:
+                active_trains = sorted(df['Train'].unique().tolist())
+                train_list_str = ", ".join([f"`{t}`" for t in active_trains])
+                await message.channel.send(
+                    f"⚠️ **Error:** Please provide a train number (e.g., `!status 508`).\n"
+                    f"**Current active trains:** {train_list_str}"
+                )
+            else:
+                await message.channel.send("⚠️ **Error:** Please provide a train number. No trains currently active on the line.")
 
     async def send_alert(self, title: str, description: str, color: int = 0xFF0000):
         """Sends a proactive alert with reliability fallback."""
@@ -261,15 +267,6 @@ class WatchdogBot(discord.Client):
         try: 
             return self.db.get_recent_logs(minutes=minutes)
         except: 
-            return None
-
-    def _read_draft_file(self) -> Optional[str]:
-        if not os.path.exists(Config.DRAFT_FILE):
-            return None
-        try:
-            with open(Config.DRAFT_FILE, 'r', encoding='utf-8') as f:
-                return f.read()
-        except:
             return None
 
     async def _send_chunked_code_block(self, channel, content: str):
