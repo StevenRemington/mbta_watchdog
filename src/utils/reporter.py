@@ -14,31 +14,20 @@ class Reporter:
     def get_recent_history(self, minutes=60):
         return self.db.get_recent_logs(minutes=minutes)
 
-    def _get_receipt(self, train_id, days=7):
-        """Generates a history of failures for the email."""
-        df = self.db.get_train_history(train_id, days=days)
-        if df.empty: return ""
+    def _get_receipt(self, train_id: str, days: int = 7):
+        """Generates a history of failures using the database's aggregation logic."""
+        # NEW: Call the DB method we created in Step 2
+        bad_dates = self.db.get_failure_stats(train_id, days=days)
         
-        df['LogTime'] = pd.to_datetime(df['LogTime'])
-        df['Date'] = df['LogTime'].dt.date
-        
-        # Group by Date to find unique bad days
-        daily_stats = df.groupby('Date').agg({
-            'DelayMinutes': 'max',
-            'Status': lambda x: 'CANCELED' if 'CANCELED' in set(x) else 'Active'
-        }).reset_index()
+        count = len(bad_dates)
+        if count <= 1: 
+            return "" 
 
-        offenses = daily_stats[
-            (daily_stats['DelayMinutes'] > Config.DELAY_THRESHOLD) | 
-            (daily_stats['Status'] == 'CANCELED')
-        ]
+        # Format dates (e.g., "2023-10-01" -> "10/01")
+        formatted_dates = [datetime.strptime(d, '%Y-%m-%d').strftime('%m/%d') for d in bad_dates]
         
-        count = len(offenses)
-        if count <= 1: return "" # Ignore if it's just today
-
-        dates = [d.strftime('%m/%d') for d in offenses['Date']]
         return (f"\n   -> 🧾 HISTORY: Train {train_id} has failed {count} times in the last {days} days "
-                f"({', '.join(dates)}).")
+                f"({', '.join(formatted_dates)}).")
 
     def generate_email(self, df_recent):
         """Generates the email draft text and returns it as a string."""

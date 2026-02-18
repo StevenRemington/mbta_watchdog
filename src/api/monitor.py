@@ -140,6 +140,63 @@ class MBTAMonitor:
 
         log.info(f"Fetched {len(records)} active trains (Calculated via Predictions)")
         return pd.DataFrame(records)
+    
+    async def get_live_prediction(self, train_id: str) -> dict:
+        """
+        Fetches the immediate next prediction for a specific train.
+        Refactored from Bot._fetch_live_prediction.
+        """
+        async with aiohttp.ClientSession() as session:
+            try:
+                # 1. Find Vehicle to get the Trip ID
+                url_veh = f"{Config.MBTA_API_URL}/vehicles?filter[route]=CR-Worcester&filter[label]={train_id}"
+                async with session.get(url_veh, headers=self.headers) as resp:
+                    v_data = await resp.json()
+                    if not v_data['data']: 
+                        return None
+                    trip_id = v_data['data'][0]['relationships']['trip']['data']['id']
+
+                # 2. Get Prediction for that Trip
+                url_pred = f"{Config.MBTA_API_URL}/predictions?filter[trip]={trip_id}&sort=time&page[limit]=1&include=stop,schedule"
+                async with session.get(url_pred, headers=self.headers) as resp:
+                    p_data = await resp.json()
+                    if not p_data['data']: 
+                        return None
+                    
+                    # --- Parsing Logic ---
+                    pred = p_data['data'][0]
+                    # Helper to extract included objects
+                    included = {f"{i['type']}:{i['id']}": i for i in p_data.get('included', [])}
+                    
+                    # Times
+                    p_ts = pred['attributes']['arrival_time'] or pred['attributes']['departure_time']
+                    
+                    # Schedule
+                    s_id = pred['relationships']['schedule']['data']['id']
+                    schedule = included.get(f"schedule:{s_id}")
+                    s_ts = schedule['attributes']['arrival_time'] or schedule['attributes']['departure_time'] if schedule else None
+                    
+                    # Stop Name
+                    stop_id = pred['relationships']['stop']['data']['id']
+                    stop = included.get(f"stop:{stop_id}")
+                    stop_name = stop['attributes']['name'] if stop else "Unknown"
+
+                    # Calculate Delay
+                    delay = 0
+                    if p_ts and s_ts:
+                        p_dt = parser.parse(p_ts)
+                        s_dt = parser.parse(s_ts)
+                        delay = max(0, round((p_dt - s_dt).total_seconds() / 60))
+
+                    return {
+                        "stop": stop_name,
+                        "predicted": parser.parse(p_ts).strftime('%I:%M %p') if p_ts else "N/A",
+                        "scheduled": parser.parse(s_ts).strftime('%I:%M %p') if s_ts else "N/A",
+                        "delay": delay
+                    }
+            except Exception as e:
+                log.error(f"Prediction Fetch Error: {e}")
+                return None
 
     def save_data(self, df):
         """Saves current snapshot using the injected DB manager."""

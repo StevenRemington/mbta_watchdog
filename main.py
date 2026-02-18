@@ -93,7 +93,7 @@ async def main():
     intents = discord.Intents.default()
     intents.message_content = True
     # Injecting the reporter into the bot so it can generate drafts on the fly
-    bot = WatchdogBot(db_manager=shared_db, reporter=reporter, intents=intents)
+    bot = WatchdogBot(db_manager=shared_db, reporter=reporter, monitor=monitor, intents=intents)
 
     asyncio.create_task(monitor_loop(monitor, reporter, bot, bsky, shared_db))
     

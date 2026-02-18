@@ -119,3 +119,37 @@ class DatabaseManager:
             "max_train": worst_train['train_id'],
             "max_delay": worst_train['delay_minutes']
         }
+        
+    def get_failure_stats(self, train_id: str, days: int = 7, delay_threshold: int = 5) -> list:
+        """
+        Returns a list of dates (str) where the train failed (Late or Canceled).
+        Replaces the logic previously found in Reporter._get_receipt.
+        """
+        cutoff = datetime.now() - timedelta(days=days)
+        query = """
+            SELECT date(log_time) as log_date, MAX(delay_minutes) as max_delay, status
+            FROM train_logs
+            WHERE train_id = ? AND log_time >= ?
+            GROUP BY log_date
+        """
+        conn = self._get_conn()
+        try:
+            # We use the raw cursor here for more complex aggregation flexibility
+            cursor = conn.cursor()
+            cursor.execute(query, (train_id, cutoff))
+            rows = cursor.fetchall()
+        finally:
+            self._close_conn(conn)
+
+        bad_dates = []
+        for r in rows:
+            # r = (log_date, max_delay, status)
+            log_date, max_delay, status = r[0], r[1], r[2]
+            
+            # Check if this day counts as a 'failure'
+            # Note: The group_concat in SQLite is tricky, so we check if the *max* delay was high
+            # or if the status captured was CANCELED.
+            if max_delay > delay_threshold or status == 'CANCELED':
+                bad_dates.append(log_date)
+                
+        return bad_dates

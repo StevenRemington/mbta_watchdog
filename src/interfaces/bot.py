@@ -2,10 +2,8 @@ import discord
 import os
 import subprocess
 import pandas as pd
-import aiohttp
 from datetime import datetime
 from typing import Optional, List, Dict, Any
-from dateutil import parser
 
 from database.database import DatabaseManager
 from utils.reporter import Reporter
@@ -20,7 +18,7 @@ class WatchdogBot(discord.Client):
     Handles user commands and proactive service alerts.
     """
 
-    def __init__(self, db_manager: Optional[DatabaseManager] = None, reporter: Optional[Reporter] = None, *args, **kwargs):
+    def __init__(self, db_manager=None, reporter=None, monitor=None, *args, **kwargs):
         """
         Initialize the bot with dependency injection.
         
@@ -30,6 +28,7 @@ class WatchdogBot(discord.Client):
         super().__init__(*args, **kwargs)
         self.db = db_manager or DatabaseManager()
         self.reporter = reporter or Reporter(db_manager=self.db)
+        self.monitor = monitor
         
         # Command Registry: Updated to focus on !feedback and enhanced !status
         self.command_map = {
@@ -185,7 +184,7 @@ class WatchdogBot(discord.Client):
             return
 
         # Get Live Data
-        live_pred = await self._fetch_live_prediction(train_num)
+        live_pred = await self.monitor.get_live_prediction(train_num)
         last_entry = train_data.iloc[-1]
         max_delay = train_data['DelayMinutes'].max()
 
@@ -214,54 +213,6 @@ class WatchdogBot(discord.Client):
                 response += f"⚠️ Delay: `+{live_pred['delay']} min`"
         
         await message.channel.send(response)
-
-    async def _fetch_live_prediction(self, train_num: str) -> Optional[Dict]:
-        """Fetches the immediate next stop prediction from MBTA API."""
-        headers = {"x-api-key": Config.MBTA_API_KEY} if Config.MBTA_API_KEY else {}
-        # Find Vehicle by Train Label
-        url = f"https://api-v3.mbta.com/vehicles?filter[route]=CR-Worcester&filter[label]={train_num}"
-        
-        async with aiohttp.ClientSession() as session:
-            try:
-                async with session.get(url, headers=headers) as resp:
-                    v_data = await resp.json()
-                    if not v_data['data']: return None
-                    trip_id = v_data['data'][0]['relationships']['trip']['data']['id']
-
-                # Fetch predictions for that trip
-                pred_url = f"https://api-v3.mbta.com/predictions?filter[trip]={trip_id}&sort=time&page[limit]=1&include=stop,schedule"
-                async with session.get(pred_url, headers=headers) as resp:
-                    p_data = await resp.json()
-                    if not p_data['data']: return None
-                    
-                    pred = p_data['data'][0]
-                    p_ts = pred['attributes']['arrival_time'] or pred['attributes']['departure_time']
-                    
-                    s_ts = None
-                    stop_name = "Unknown"
-                    s_id = pred['relationships']['schedule']['data']['id']
-                    
-                    for inc in p_data.get('included', []):
-                        if inc['type'] == 'schedule' and inc['id'] == s_id:
-                            s_ts = inc['attributes']['arrival_time'] or inc['attributes']['departure_time']
-                        if inc['type'] == 'stop' and inc['id'] == pred['relationships']['stop']['data']['id']:
-                            stop_name = inc['attributes']['name']
-
-                    def fmt(ts): 
-                        return parser.parse(ts).strftime('%I:%M %p') if ts else "N/A"
-                    
-                    delay = 0
-                    if p_ts and s_ts:
-                        delay = round((parser.parse(p_ts) - parser.parse(s_ts)).total_seconds() / 60)
-
-                    return {
-                        "stop": stop_name, 
-                        "predicted": fmt(p_ts), 
-                        "scheduled": fmt(s_ts), 
-                        "delay": max(0, delay)
-                    }
-            except: 
-                return None
 
     def _get_recent_data(self, minutes: int):
         try: 
