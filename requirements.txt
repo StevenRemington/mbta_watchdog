@@ -8,3 +8,4 @@ schedule
 requests
 pytest
 pytest-asyncio
+atproto

@@ -4,14 +4,20 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Resolves to the 'mbta_watchdog' root folder
+# Resolves to the 'mbta_watchdog' root folder (4 levels up from this file)
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 
 class Config:
+    # --- SECRETS ---
     DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
     THINGSPEAK_API_KEY = os.getenv("THINGSPEAK_API_KEY")
     MBTA_API_KEY = os.getenv("MBTA_API_KEY")
     DISCORD_ALERT_CHANNEL_ID = int(os.getenv("DISCORD_ALERT_CHANNEL_ID", 0))
+    DISCORD_OWNER_ID = int(os.getenv("DISCORD_OWNER_ID", 0))
+    
+    # Bluesky Secrets
+    BLUESKY_HANDLE = os.getenv("BLUESKY_HANDLE")
+    BLUESKY_PASSWORD = os.getenv("BLUESKY_PASSWORD")
 
     # --- PATHS ---
     DATA_DIR = ROOT_DIR / "data"
@@ -21,12 +27,12 @@ class Config:
     DRAFT_FILE = str(DATA_DIR / "current_email_draft.txt")
 
     # API & THRESHOLDS
-    MBTA_API_URL = "https://api-v3.mbta.com/vehicles?filter[route]=CR-Worcester&include=stop"
+    MBTA_API_URL = "https://api-v3.mbta.com/"
     THINGSPEAK_URL = "https://api.thingspeak.com/update"
     POLL_INTERVAL_SECONDS = 120
     DELAY_THRESHOLD = 5
-    MAJOR_DELAY_THRESHOLD = 20
+    MAJOR_DELAY_THRESHOLD = 15
 
-    # Ensure directories exist
+    # Ensure directories exist locally
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     LOG_DIR.mkdir(parents=True, exist_ok=True)
