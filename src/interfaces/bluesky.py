@@ -7,9 +7,7 @@ log = get_logger("Bluesky")
 
 class BlueskyClient:
     def __init__(self):
-        """
-        Handles Bluesky (AT Protocol) integration.
-        """
+        """Handles Bluesky (AT Protocol) integration."""
         self.client = Client()
         self.is_logged_in = False
         self._login()
@@ -26,9 +24,7 @@ class BlueskyClient:
             log.error(f"Failed to login to Bluesky: {e}")
 
     def send_skeet(self, text):
-        """
-        Posts a skeet with functional facets and returns the public web URL.
-        """
+        """Posts a skeet and returns the public web URL."""
         if not self.is_logged_in: 
             return None
         try:
@@ -55,11 +51,9 @@ class BlueskyClient:
                 if i < len(words) - 1: 
                     tb.text(' ')
             
-            # Post to Bluesky
             resp = self.client.send_post(tb)
             log.info(f"Skeet posted successfully.")
             
-            # Construct and return the public URL
             rkey = resp.uri.split('/')[-1]
             return f"https://bsky.app/profile/{Config.BLUESKY_HANDLE}/post/{rkey}"
             
@@ -67,29 +61,9 @@ class BlueskyClient:
             log.error(f"Skeet failed: {e}")
             return None
 
-    def post_morning_grade(self, stats):
-        """Formats and posts the morning commute grade."""
-        if not stats or not self.is_logged_in: return None
-        
-        # Select Icon based on Grade
-        grade_map = {"A": "🟢", "B": "🟢", "C": "🟡", "D": "🔴", "F": "💀"}
-        icon = grade_map.get(stats['grade'], "⚪")
-
-        text = (
-            f"🌅 Morning Commute Report ({stats['date']})\n\n"
-            f"{icon} Grade: {stats['grade']}\n"
-            f"🚆 {stats['total']} Trains Ran\n"
-            f"✅ {stats['total'] - stats['late'] - stats['canceled']} On Time\n"
-            f"⚠️ {stats['late']} Late\n"
-            f"🚫 {stats['canceled']} Canceled\n\n"
-            f"🐌 Worst Offender: Train {stats['worst_train']} (+{stats['worst_delay']}m)\n"
-            f"@mbta.com #WorcesterLine #MBTA"
-        )
-        return self.send_skeet(text)
-
     def post_daily_summary(self, stats):
         """Formats and posts the daily highlight summary."""
-        if not stats or not self.is_logged_in: return
+        if not stats or not self.is_logged_in: return None
         
         try:
             date_str = datetime.strptime(stats['date'], '%Y-%m-%d').strftime('%b %d')
@@ -105,19 +79,21 @@ class BlueskyClient:
         )
         return self.send_skeet(text)
 
-if __name__ == "__main__":
-    # Standalone Test Suite
-    # Note: Do NOT import BlueskyClient here; use it directly as it is in the same file.
-    print("🧪 Starting Bluesky Integration Test...")
-    bsky = BlueskyClient()
-    
-    if bsky.is_logged_in:
-        test_msg = f"🤖 Test Skeet from @{Config.BLUESKY_HANDLE}\n#MBTAWatchdog Integration Verified."
-        print("Sending test post...")
-        url = bsky.send_skeet(test_msg)
-        if url:
-            print(f"✅ Success! View here: {url}")
-        else:
-            print("❌ Post failed.")
-    else:
-        print("❌ Login failed. Verify .env credentials.")
+    def post_morning_grade(self, stats):
+        """Formats and posts the morning commute grade."""
+        if not stats or not self.is_logged_in: return None
+        
+        grade_map = {"A": "🟢", "B": "🟢", "C": "🟡", "D": "🔴", "F": "💀"}
+        icon = grade_map.get(stats['grade'], "⚪")
+
+        text = (
+            f"🌅 Morning Commute Report ({stats['date']})\n\n"
+            f"{icon} Grade: {stats['grade']}\n"
+            f"🚆 {stats['total']} Trains Ran\n"
+            f"✅ {stats['total'] - stats['late'] - stats['canceled']} On Time\n"
+            f"⚠️ {stats['late']} Late\n"
+            f"🚫 {stats['canceled']} Canceled\n\n"
+            f"🐌 Worst Offender: Train {stats['worst_train']} (+{stats['worst_delay']}m)\n"
+            f"@mbta.com #WorcesterLine #MBTA"
+        )
+        return self.send_skeet(text)
