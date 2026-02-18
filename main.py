@@ -35,8 +35,8 @@ def initialize_app():
     Config.LOG_DIR.mkdir(parents=True, exist_ok=True)
     log.info("📁 Environment Initialized")
 
-async def process_alerts(bot, bsky, current_data, state: WatchdogState):
-    """Checks for service disruptions and sends cross-platform notifications."""
+async def process_alerts(bot, bsky, current_data, state: WatchdogState, db: DatabaseManager):
+    """Checks for disruptions and adds historical context to alerts."""
     if current_data.empty:
         state.alert_history.clear()
         return
@@ -54,15 +54,30 @@ async def process_alerts(bot, bsky, current_data, state: WatchdogState):
         
         last_cond = state.alert_history.get(tid, "NONE")
         
+        # If we are about to send an alert, generate the "Receipt"
+        receipt_text = ""
+        if condition in ["CANCELED", "LATE_MAJOR"] and condition != last_cond:
+            # Check history (This returns 'today' + past failures)
+            bad_dates = db.get_failure_stats(tid)
+            
+            # If there is more than just today's failure, shame them.
+            if len(bad_dates) > 1:
+                # Format dates: "2024-02-14" -> "02/14"
+                dates_str = ", ".join([datetime.strptime(d, '%Y-%m-%d').strftime('%m/%d') for d in bad_dates])
+                receipt_text = f"\n\n🧾 HISTORY: Failed {len(bad_dates)}x in last 7 days ({dates_str})."
+        # ---------------------------
+
         if condition == "CANCELED" and last_cond != "CANCELED":
-            skeet_text = f"🚨 ALERT: MBTA Commuter Rail Train {tid} has been CANCELED at {row['Station']}. @mbta.com #MBTA #WorcesterLine"
+            skeet_text = f"🚨 ALERT: MBTA Commuter Rail Train {tid} has been CANCELED at {row['Station']}.{receipt_text} @mbta.com #MBTA #WorcesterLine"
+            
             post_url = bsky.send_skeet(skeet_text)
             description = f"🔗 [View Alert on Bluesky]({post_url})" if post_url else f"Location: {row['Station']}"
             await bot.send_alert(f"🚨 Train {tid} CANCELED", description, 0x000000)
             state.alert_history[tid] = "CANCELED"
         
         elif condition == "LATE_MAJOR" and last_cond not in ["LATE_MAJOR", "CANCELED"]:
-            skeet_text = f"⚠️ SEVERE DELAY: Train {tid} is running {row['DelayMinutes']} minutes late at {row['Station']}. @mbta.com #MBTA #WorcesterLine"
+            skeet_text = f"⚠️ SEVERE DELAY: Train {tid} is running {row['DelayMinutes']} minutes late at {row['Station']}.{receipt_text} @mbta.com #MBTA #WorcesterLine"
+            
             post_url = bsky.send_skeet(skeet_text)
             description = f"🔗 [View Alert on Bluesky]({post_url})" if post_url else f"{row['DelayMinutes']} min late @ {row['Station']}"
             await bot.send_alert(f"⚠️ Major Delay: Train {tid}", description, 0xFF0000)
@@ -80,7 +95,7 @@ async def monitor_loop(monitor, reporter, bot, bsky, db, state: WatchdogState):
             # 1. Core Logic
             data = await monitor.fetch_data()
             monitor.save_data(data)
-            await process_alerts(bot, bsky, data, state)
+            await process_alerts(bot, bsky, data, state, db)
             
             # 2. Reporting
             await reporter.push_to_thingspeak(data) 
