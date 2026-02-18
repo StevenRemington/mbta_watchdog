@@ -1,8 +1,9 @@
 import discord
 import os
-import pandas as pd
+import aiohttp
 from datetime import datetime
 from typing import Optional, List, Dict, Any
+from dateutil import parser
 
 from database.database import DatabaseManager
 from utils.reporter import Reporter
@@ -14,36 +15,28 @@ log = get_logger("Bot")
 class WatchdogBot(discord.Client):
     """
     Discord Bot interface for the MBTA Watchdog system.
-    Handles user commands and proactive service alerts.
     """
 
-    def __init__(self, db_manager=None, reporter=None, monitor=None, *args, **kwargs):
-        """
-        Initialize the bot with dependency injection.
-        
-        :param db_manager: Database manager for historical queries.
-        :param reporter: Reporter instance for on-demand email draft generation.
-        """
+    def __init__(self, db_manager: Optional[DatabaseManager] = None, reporter: Optional[Reporter] = None, monitor=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.db = db_manager or DatabaseManager()
         self.reporter = reporter or Reporter(db_manager=self.db)
         self.monitor = monitor
         
-        # Command Registry: Updated to focus on !feedback and enhanced !status
+        # Command Registry
         self.command_map = {
             '!help': self.cmd_help,
             '!list': self.cmd_list,
             '!status': self.cmd_status,
             '!feedback': self.cmd_feedback,
-            '!health': self.cmd_health
+            '!health': self.cmd_health,
+            '!analyze': self.cmd_analyze  # <--- NEW COMMAND
         }
 
     async def on_ready(self):
-        """Triggered when the bot successfully connects to Discord."""
         log.info(f'Logged in as {self.user} (ID: {self.user.id})')
 
     async def on_message(self, message: discord.Message):
-        """Core event listener. Filters messages and dispatches commands."""
         if message.author == self.user or not message.content:
             return
 
@@ -62,7 +55,7 @@ class WatchdogBot(discord.Client):
                 await handler(message, args)
             except Exception as e:
                 log.error(f"Error executing {command}: {e}", exc_info=True)
-                await message.channel.send("⚠️ An internal error occurred while processing your command.")
+                await message.channel.send("⚠️ An internal error occurred.")
 
     # =========================================================================
     # COMMAND HANDLERS
@@ -73,16 +66,60 @@ class WatchdogBot(discord.Client):
         help_text = (
             "**🚆 MBTA Watchdog Help**\n"
             "```\n"
-            "!list          : Live board of active trains & locations\n"
-            "!status <num>  : View stats & predictions for a specific train\n"
-            "!feedback      : Generate a live complaint email draft\n"
-            "!health        : Check system health and database updates\n"
+            "!list          : Live board of active trains\n"
+            "!status <num>  : Live status & next stop prediction\n"
+            "!analyze <num> : 30-Day Performance Report Card\n"
+            "!feedback      : Generate a complaint email draft\n"
             "```"
         )
         await message.channel.send(help_text)
 
+    async def cmd_analyze(self, message: discord.Message, args: Optional[str]):
+        """Generates a 30-day performance report card for a train."""
+        if not args:
+            await message.channel.send("⚠️ Usage: `!analyze <train_number>` (e.g., `!analyze 508`)")
+            return
+
+        train_num = args.strip()
+        
+        # 1. Fetch Data from DB
+        stats = self.db.get_train_analysis(train_num, days=30)
+        
+        if not stats:
+            await message.channel.send(f"❌ No history found for **Train {train_num}** in the last 30 days.")
+            return
+
+        # 2. Determine Color / Grade
+        rel = stats['reliability_percent']
+        if rel >= 90: color = 0x2ecc71 # Green
+        elif rel >= 80: color = 0xf1c40f # Yellow
+        elif rel >= 70: color = 0xe67e22 # Orange
+        else: color = 0xe74c3c # Red
+
+        # 3. Build Embed
+        embed = discord.Embed(
+            title=f"📊 Analysis: Train {train_num}",
+            description=f"Performance Report (Last 30 Days)",
+            color=color
+        )
+        
+        embed.add_field(name="Reliability", value=f"**{stats['reliability_percent']}%**", inline=True)
+        embed.add_field(name="Avg Delay", value=f"{stats['avg_delay_minutes']} min", inline=True)
+        embed.add_field(name="Worst Day", value=stats['worst_day'], inline=True)
+        
+        embed.add_field(
+            name="Incidents", 
+            value=f"🛑 **{stats['canceled_count']}** Canceled\n⚠️ **{stats['late_count']}** Major Delays", 
+            inline=False
+        )
+        
+        embed.set_footer(text=f"Based on {stats['total_runs']} data points.")
+        
+        await message.channel.send(embed=embed)
+
+    # ... [Keep existing cmd_health, cmd_feedback, cmd_list, cmd_status handlers] ...
+    
     async def cmd_health(self, message: discord.Message, args: Optional[str]):
-        """Checks if the system is receiving live updates."""
         try:
             df = self._get_recent_data(minutes=15)
             if df is None:
@@ -93,26 +130,21 @@ class WatchdogBot(discord.Client):
                 await message.channel.send("⚠️ **Warning:** No data recorded in the last 15 minutes.")
             else:
                 last_time = df['LogTime'].max()
-                await message.channel.send(f"✅ **System Healthy**\n🕒 Latest Data: `{last_time}`\n📊 Entries recorded (15m): `{len(df)}`")
+                await message.channel.send(f"✅ **System Healthy**\n🕒 Latest: `{last_time}`\n📊 Rows: `{len(df)}`")
         except Exception as e:
             await message.channel.send(f"❌ **Error:** {e}")
 
     async def cmd_feedback(self, message: discord.Message, args: Optional[str]):
-        """Provides mobile-friendly copy-paste text for the MBTA form."""
         await message.channel.send("**1️⃣ Open Form:** https://www.mbta.com/customer-support")
-        
-        # Fetch the last 60 minutes of history to generate a context-aware draft
         df = self._get_recent_data(minutes=60)
-        
         if df is not None:
             content = self.reporter.generate_email(df)
             await message.channel.send("**2️⃣ Copy Text:**")
             await self._send_chunked_code_block(message.channel, content)
         else:
-            await message.channel.send("⚠️ Unable to generate draft: Database history unavailable.")
+            await message.channel.send("⚠️ Database unavailable.")
 
     async def cmd_list(self, message: discord.Message, args: Optional[str]):
-        """Displays a live board of all active trains."""
         df = self._get_recent_data(minutes=30)
         if df is None or df.empty:
             await message.channel.send("⚠️ No active trains detected.")
@@ -133,47 +165,36 @@ class WatchdogBot(discord.Client):
         await message.channel.send(response)
 
     async def cmd_status(self, message: discord.Message, args: Optional[str]):
-        """Handles specific train lookup. Errors out if no train number is provided."""
         if args:
             await self._handle_specific_train_status(message, args.strip())
         else:
-            # Provide error and suggest active trains
             df = self._get_recent_data(minutes=30)
             if df is not None and not df.empty:
-                active_trains = sorted(df['Train'].unique().tolist())
-                train_list_str = ", ".join([f"`{t}`" for t in active_trains])
-                await message.channel.send(
-                    f"⚠️ **Error:** Please provide a train number (e.g., `!status 508`).\n"
-                    f"**Current active trains:** {train_list_str}"
-                )
+                active = sorted(df['Train'].unique().tolist())
+                t_list = ", ".join([f"`{t}`" for t in active])
+                await message.channel.send(f"⚠️ Usage: `!status <num>`\nActive: {t_list}")
             else:
-                await message.channel.send("⚠️ **Error:** Please provide a train number. No trains currently active on the line.")
+                await message.channel.send("⚠️ Usage: `!status <num>` (No active trains)")
 
     async def send_alert(self, title: str, description: str, color: int = 0xFF0000):
-        """Sends a proactive alert with reliability fallback."""
         if Config.DISCORD_ALERT_CHANNEL_ID == 0: return
-        
         channel = self.get_channel(Config.DISCORD_ALERT_CHANNEL_ID)
         if not channel:
-            try:
-                channel = await self.fetch_channel(Config.DISCORD_ALERT_CHANNEL_ID)
-            except: 
-                log.error(f"Failed to find channel ID {Config.DISCORD_ALERT_CHANNEL_ID}")
-                return
+            try: channel = await self.fetch_channel(Config.DISCORD_ALERT_CHANNEL_ID)
+            except: return
 
         if channel:
             try:
                 embed = discord.Embed(title=title, description=description, color=color)
                 await channel.send(embed=embed)
             except Exception as e:
-                log.error(f"Discord Alert Send Error: {e}")
+                log.error(f"Alert Error: {e}")
 
     # =========================================================================
     # INTERNAL HELPERS
     # =========================================================================
 
     async def _handle_specific_train_status(self, message: discord.Message, train_num: str):
-        """Detailed report including historical DB data and live API predictions."""
         df = self._get_recent_data(minutes=60)
         if df is None: return
 
@@ -182,18 +203,18 @@ class WatchdogBot(discord.Client):
             await message.channel.send(f"❌ No recent logs found for **Train {train_num}**.")
             return
 
-        # Get Live Data
-        live_pred = await self.monitor.get_live_prediction(train_num)
+        # Use the injected Monitor to get live predictions (Refactored logic)
+        live_pred = None
+        if self.monitor:
+             live_pred = await self.monitor.get_live_prediction(train_num)
+
         last_entry = train_data.iloc[-1]
         max_delay = train_data['DelayMinutes'].max()
-
-        # Parse Time Safely
+        
         log_time = last_entry['LogTime']
         if isinstance(log_time, str):
-            try: 
-                log_time = pd.to_datetime(log_time)
-            except: 
-                log_time = None
+            try: log_time = pd.to_datetime(log_time)
+            except: log_time = None
         time_str = log_time.strftime('%H:%M') if log_time else str(last_entry['LogTime'])
 
         response = (
@@ -214,13 +235,10 @@ class WatchdogBot(discord.Client):
         await message.channel.send(response)
 
     def _get_recent_data(self, minutes: int):
-        try: 
-            return self.db.get_recent_logs(minutes=minutes)
-        except: 
-            return None
+        try: return self.db.get_recent_logs(minutes=minutes)
+        except: return None
 
     async def _send_chunked_code_block(self, channel, content: str):
-        """Splits long text into multiple Discord code blocks to avoid 2000 char limit."""
         chunk_size = 1900
         for i in range(0, len(content), chunk_size):
             chunk = content[i:i + chunk_size]

@@ -1,13 +1,31 @@
+import sys
+import os
+from pathlib import Path
+
+# This resolves to: .../mbta-watchdog/src
+SRC_PATH = str(Path(__file__).resolve().parent.parent)
+if SRC_PATH not in sys.path:
+    sys.path.insert(0, SRC_PATH)
+
 from atproto import Client, client_utils
 from datetime import datetime
+import re
 from utils.config import Config
 from utils.logger import get_logger
 
 log = get_logger("Bluesky")
 
+# Static Identity Cache (Recommended for Backend Services)
+# Pre-resolving critical handles ensures 100% reliability even if the PDS is slow.
+KNOWN_DIDS = {
+    "mbta.com": "did:plc:czvissxm5nhe6m6aydsdxe26"
+}
+
 class BlueskyClient:
     def __init__(self):
-        """Handles Bluesky (AT Protocol) integration."""
+        """
+        Handles Bluesky (AT Protocol) integration.
+        """
         self.client = Client()
         self.is_logged_in = False
         self._login()
@@ -24,36 +42,72 @@ class BlueskyClient:
             log.error(f"Failed to login to Bluesky: {e}")
 
     def send_skeet(self, text):
-        """Posts a skeet and returns the public web URL."""
+        """
+        Posts a skeet with functional facets (mentions/links) and returns the URL.
+        """
         if not self.is_logged_in: 
             return None
         try:
+            # Truncate to limit
             if len(text) > 300: text = text[:297] + "..."
             
             tb = client_utils.TextBuilder()
+            
+            # Split by whitespace to process each token
             words = text.split(' ')
+            
             for i, word in enumerate(words):
+                # --- HANDLE MENTIONS (@mbta.com) ---
                 if word.startswith('@') and len(word) > 1:
-                    handle = word[1:].rstrip('.,!?:;')
+                    # Regex: Remove leading @ and any trailing punctuation (.,!?:)
+                    # Example: "@mbta.com." -> "mbta.com"
+                    clean_handle = re.sub(r'^@|[^a-zA-Z0-9.-]', '', word).lower()
+                    
                     try:
-                        resolved = self.client.resolve_handle(handle)
-                        tb.mention(word, resolved.did)
-                    except:
-                        tb.text(word)
+                        did = None
+                        # 1. Check Static Cache (Fastest & Most Reliable)
+                        if clean_handle in KNOWN_DIDS:
+                            did = KNOWN_DIDS[clean_handle]
+                        
+                        # 2. Use Standard API (com.atproto.identity.resolveHandle)
+                        if not did:
+                            resolved = self.client.resolve_handle(clean_handle)
+                            did = resolved.did
+                        
+                        # 3. Add Mention Facet
+                        tb.mention(word, did)
+
+                    except Exception as e:
+                        # 4. Fallback: If API fails, check if it's a domain and Link it
+                        # This handles cases where a handle is valid as a website but not a Bsky user.
+                        if '.' in clean_handle:
+                             tb.link(word, f"https://{clean_handle}")
+                        else:
+                             tb.text(word)
+
+                # --- HASHTAGS (#MBTA) ---
                 elif word.startswith('#') and len(word) > 1:
-                    tag = word[1:].rstrip('.,!?:;')
+                    tag = re.sub(r'^#|[^a-zA-Z0-9]', '', word)
                     tb.tag(word, tag)
+                
+                # --- URLS (http...) ---
                 elif word.startswith('http'):
-                    tb.link(word, word.rstrip('.,!?:;'))
+                    clean_url = word.rstrip('.,!?:;')
+                    tb.link(word, clean_url)
+                
+                # --- PLAIN TEXT ---
                 else:
                     tb.text(word)
                 
+                # Restore space between words
                 if i < len(words) - 1: 
                     tb.text(' ')
             
+            # Post to Bluesky
             resp = self.client.send_post(tb)
             log.info(f"Skeet posted successfully.")
             
+            # Return Public URL
             rkey = resp.uri.split('/')[-1]
             return f"https://bsky.app/profile/{Config.BLUESKY_HANDLE}/post/{rkey}"
             
@@ -97,3 +151,19 @@ class BlueskyClient:
             f"@mbta.com #WorcesterLine #MBTA"
         )
         return self.send_skeet(text)
+
+if __name__ == "__main__":
+    print("🧪 Starting Bluesky Integration Test...")
+    bsky = BlueskyClient()
+    
+    if bsky.is_logged_in:
+        # Test the MBTA handle specifically
+        test_msg = f"🤖 Test Link Logic: @mbta.com should be blue. #MBTAWatchdog"
+        print("Sending test post...")
+        url = bsky.send_skeet(test_msg)
+        if url:
+            print(f"✅ Success! View here: {url}")
+        else:
+            print("❌ Post failed.")
+    else:
+        print("❌ Login failed. Verify .env credentials.")

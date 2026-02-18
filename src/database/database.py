@@ -233,3 +233,75 @@ class DatabaseManager:
             "worst_train": worst_train['train_id'],
             "worst_delay": worst_train['delay_minutes']
         }
+    
+    def get_train_analysis(self, train_id: str, days: int = 30):
+        """
+        Generates a 30-day performance report for a specific train.
+        Returns a dict with reliability %, avg delay, and worst day of week.
+        """
+        cutoff = datetime.now() - timedelta(days=days)
+        conn = self._get_conn()
+        
+        try:
+            # 1. General Stats (Total runs, Lates, Cancels, Avg Delay)
+            # We use the Config threshold (5 mins) to define "Late"
+            query_stats = """
+                SELECT 
+                    COUNT(*) as total,
+                    SUM(CASE WHEN status = 'CANCELED' THEN 1 ELSE 0 END) as canceled,
+                    SUM(CASE WHEN delay_minutes > ? AND status != 'CANCELED' THEN 1 ELSE 0 END) as late,
+                    AVG(delay_minutes) as avg_delay
+                FROM train_logs 
+                WHERE train_id = ? AND log_time >= ?
+            """
+            cursor = conn.cursor()
+            cursor.execute(query_stats, (Config.DELAY_THRESHOLD, train_id, cutoff))
+            stats = cursor.fetchone() # returns tuple: (total, canceled, late, avg_delay)
+            
+            if not stats or stats[0] == 0:
+                return None
+
+            total = stats[0]
+            canceled = stats[1] if stats[1] else 0
+            late = stats[2] if stats[2] else 0
+            avg_delay = stats[3] if stats[3] else 0
+            
+            # 2. Worst Day Analysis
+            # SQLite strftime('%w') returns 0=Sunday, 1=Monday...
+            # We find the day with the highest average delay.
+            query_days = """
+                SELECT 
+                    strftime('%w', log_time) as dow,
+                    AVG(delay_minutes) as avg_daily_delay
+                FROM train_logs
+                WHERE train_id = ? AND log_time >= ?
+                GROUP BY dow
+                ORDER BY avg_daily_delay DESC
+                LIMIT 1
+            """
+            cursor.execute(query_days, (train_id, cutoff))
+            worst_day_row = cursor.fetchone()
+            
+            worst_day_str = "N/A"
+            if worst_day_row:
+                days_map = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+                worst_day_str = days_map[int(worst_day_row[0])]
+
+            # 3. Calculate Reliability Score
+            # Formula: (Total - Bad Outcomes) / Total
+            failures = (canceled + late)
+            reliability = ((total - failures) / total) * 100
+
+            return {
+                "train_id": train_id,
+                "days_analyzed": days,
+                "total_runs": total,
+                "reliability_percent": round(reliability, 1),
+                "avg_delay_minutes": round(avg_delay, 1),
+                "worst_day": worst_day_str,
+                "canceled_count": canceled,
+                "late_count": late
+            }
+
+        finally:
+            self._close_conn(conn)
