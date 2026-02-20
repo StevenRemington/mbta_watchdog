@@ -43,7 +43,7 @@ class BlueskyClient:
 
     def send_skeet(self, text):
         """
-        Posts a skeet with functional facets (mentions/links) and returns the URL.
+        Posts a skeet with functional facets (mentions/links/tags) and returns the URL.
         """
         if not self.is_logged_in: 
             return None
@@ -53,15 +53,20 @@ class BlueskyClient:
             
             tb = client_utils.TextBuilder()
             
-            # Split by whitespace to process each token
-            words = text.split(' ')
+            # Split by any whitespace but keep the whitespace tokens
+            tokens = re.split(r'(\s+)', text)
             
-            for i, word in enumerate(words):
+            for token in tokens:
+                # If the token is just whitespace (like \n or space), add it and move on
+                if not token.strip():
+                    tb.text(token)
+                    continue
+                    
                 # --- HANDLE MENTIONS (@mbta.com) ---
-                if word.startswith('@') and len(word) > 1:
+                if token.startswith('@') and len(token) > 1:
                     # Regex: Remove leading @ and any trailing punctuation (.,!?:)
                     # Example: "@mbta.com." -> "mbta.com"
-                    clean_handle = re.sub(r'^@|[^a-zA-Z0-9.-]', '', word).lower()
+                    clean_handle = re.sub(r'^@|[^a-zA-Z0-9.-]', '', token).lower()
                     
                     try:
                         did = None
@@ -75,33 +80,29 @@ class BlueskyClient:
                             did = resolved.did
                         
                         # 3. Add Mention Facet
-                        tb.mention(word, did)
+                        tb.mention(token, did)
 
                     except Exception as e:
                         # 4. Fallback: If API fails, check if it's a domain and Link it
                         # This handles cases where a handle is valid as a website but not a Bsky user.
                         if '.' in clean_handle:
-                             tb.link(word, f"https://{clean_handle}")
+                             tb.link(token, f"https://{clean_handle}")
                         else:
-                             tb.text(word)
+                             tb.text(token)
 
                 # --- HASHTAGS (#MBTA) ---
-                elif word.startswith('#') and len(word) > 1:
-                    tag = re.sub(r'^#|[^a-zA-Z0-9]', '', word)
-                    tb.tag(word, tag)
+                elif token.startswith('#') and len(token) > 1:
+                    tag = re.sub(r'^#|[^a-zA-Z0-9]', '', token)
+                    tb.tag(token, tag)
                 
                 # --- URLS (http...) ---
-                elif word.startswith('http'):
-                    clean_url = word.rstrip('.,!?:;')
-                    tb.link(word, clean_url)
+                elif token.startswith('http'):
+                    clean_url = token.rstrip('.,!?:;')
+                    tb.link(token, clean_url)
                 
                 # --- PLAIN TEXT ---
                 else:
-                    tb.text(word)
-                
-                # Restore space between words
-                if i < len(words) - 1: 
-                    tb.text(' ')
+                    tb.text(token)
             
             # Post to Bluesky
             resp = self.client.send_post(tb)
