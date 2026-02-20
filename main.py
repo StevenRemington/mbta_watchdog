@@ -17,6 +17,7 @@ from database.database import DatabaseManager
 from api.monitor import MBTAMonitor
 from interfaces.bot import WatchdogBot
 from interfaces.bluesky import BlueskyClient
+from interfaces.twitter import TwitterClient
 
 log = get_logger("Main")
 
@@ -33,8 +34,8 @@ def initialize_app():
     Config.LOG_DIR.mkdir(parents=True, exist_ok=True)
     log.info("📁 Environment Initialized")
 
-async def process_alerts(bot, bsky, current_data, state: WatchdogState, db: DatabaseManager):
-    """Checks for disruptions and mirrors ONLY successful Skeets to Discord."""
+async def process_alerts(bot, bsky, twitter, current_data, state: WatchdogState, db: DatabaseManager, reporter):
+    """Checks for disruptions and mirrors successful social posts to Discord."""
     if current_data.empty:
         state.alert_history.clear()
         return
@@ -44,6 +45,7 @@ async def process_alerts(bot, bsky, current_data, state: WatchdogState, db: Data
         tid = str(row['Train'])
         active_ids.add(tid)
         
+        # Determine current condition
         condition = "NONE"
         if row['Status'] == "CANCELED": 
             condition = "CANCELED"
@@ -51,82 +53,64 @@ async def process_alerts(bot, bsky, current_data, state: WatchdogState, db: Data
             condition = "LATE_MAJOR"
         
         last_cond = state.alert_history.get(tid, "NONE")
-        
-        # --- Context Engine ---
-        receipt_text = ""
-        if condition in ["CANCELED", "LATE_MAJOR"] and condition != last_cond:
-            bad_dates = db.get_failure_stats(tid)
-            if len(bad_dates) > 1:
-                dates_str = ", ".join([datetime.strptime(d, '%Y-%m-%d').strftime('%m/%d') for d in bad_dates])
-                receipt_text = f"\n\n🧾 HISTORY: Failed {len(bad_dates)}x in last 7 days ({dates_str})."
-        # ----------------------
 
-        if condition == "CANCELED" and last_cond != "CANCELED":
-            skeet_text = f"🚨 ALERT: MBTA Commuter Rail Train {tid} has been CANCELED at {row['Station']}.{receipt_text} @mbta.com #MBTA #WorcesterLine"
-            post_url = bsky.send_skeet(skeet_text)
+        # Logic Gate: Only post if status worsened
+        if (condition == "CANCELED" and last_cond != "CANCELED") or \
+           (condition == "LATE_MAJOR" and last_cond not in ["LATE_MAJOR", "CANCELED"]):
             
-            # GATEKEEPER: Only send to Discord if Skeet succeeded
+            history = db.get_failure_stats(tid)
+            
+            # 1. Post to Bluesky
+            bsky_text = reporter.format_alert(row, condition, history, platform="bluesky")
+            post_url = bsky.send_skeet(bsky_text)
+            
+            # 2. Post to Twitter
+            twitter_text = reporter.format_alert(row, condition, history, platform="twitter")
+            twitter.post_alert(twitter_text)
+            
+            # 3. Mirror to Discord only if Bluesky succeeded (acting as the URL source)
             if post_url:
+                title = f"🚨 Train {tid} CANCELED" if condition == "CANCELED" else f"⚠️ Major Delay: Train {tid}"
+                color = 0x000000 if condition == "CANCELED" else 0xFF0000
                 description = f"🔗 [View Alert on Bluesky]({post_url})"
-                await bot.send_alert(f"🚨 Train {tid} CANCELED", description, 0x000000)
+                await bot.send_alert(title, description, color)
             
-            state.alert_history[tid] = "CANCELED"
-        
-        elif condition == "LATE_MAJOR" and last_cond not in ["LATE_MAJOR", "CANCELED"]:
-            skeet_text = f"⚠️ SEVERE DELAY: Train {tid} is running {row['DelayMinutes']} minutes late at {row['Station']}.{receipt_text} @mbta.com #MBTA #WorcesterLine"
-            post_url = bsky.send_skeet(skeet_text)
-            
-            # GATEKEEPER: Only send to Discord if Skeet succeeded
-            if post_url:
-                description = f"🔗 [View Alert on Bluesky]({post_url})"
-                await bot.send_alert(f"⚠️ Major Delay: Train {tid}", description, 0xFF0000)
-            
-            state.alert_history[tid] = "LATE_MAJOR"
+            state.alert_history[tid] = condition
 
-    for tid in list(state.alert_history.keys()):
-        if tid not in active_ids: 
-            del state.alert_history[tid]
+    # Cleanup logic
+    state.alert_history = {k: v for k, v in state.alert_history.items() if k in active_ids}
 
-async def monitor_loop(monitor, reporter, bot, bsky, db, state: WatchdogState):
+async def monitor_loop(monitor, reporter, bot, bsky, twitter, db, state: WatchdogState):
     log.info("Starting Monitor Loop...")
     while True:
         try:
-            # 1. Core Logic
             data = await monitor.fetch_data()
             monitor.save_data(data)
-            await process_alerts(bot, bsky, data, state, db)
             
-            # 2. Reporting
+            # Process real-time alerts
+            await process_alerts(bot, bsky, twitter, data, state, db, reporter)
+            
+            # External Reporting (ThingSpeak)
             await reporter.push_to_thingspeak(data) 
 
             now = datetime.now()
             today_str = now.strftime('%Y-%m-%d')
 
-            # 3. Morning Grade Logic (10:00 AM)
-            if now.hour == 10 and now.minute <= 5 and state.last_morning_report_date != today_str:
-                log.info("Generating Morning Commute Grade...")
-                morning_stats = db.get_morning_commute_stats()
-                if morning_stats:
-                    post_url = bsky.post_morning_grade(morning_stats)
-                    
-                    # GATEKEEPER
-                    if post_url:
-                        description = f"🔗 [View Report on Bluesky]({post_url})"
-                        grade_color = 0x2ecc71 if morning_stats['grade'] in ['A', 'B'] else 0xe74c3c
-                        await bot.send_alert(f"🌅 Morning Grade: {morning_stats['grade']}", description, grade_color)
-                        state.last_morning_report_date = today_str
+            # Periodic Reports
+            reports = [
+                {"hour": 10, "attr": "last_morning_report_date", "func": db.get_morning_commute_stats, "fmt": reporter.format_morning_grade, "label": "Morning Grade"},
+                {"hour": 21, "attr": "last_summary_date", "func": db.get_daily_summary_stats, "fmt": reporter.format_daily_summary, "label": "Daily Summary"}
+            ]
 
-            # 4. Daily Summary Logic (9:00 PM)
-            if now.hour == 21 and now.minute <= 5 and state.last_summary_date != today_str:
-                log.info("Generating Daily Highlight Post...")
-                stats = db.get_daily_summary_stats()
-                post_url = bsky.post_daily_summary(stats)
-                
-                # GATEKEEPER
-                if post_url:
-                    description = f"🔗 [View Daily Summary on Bluesky]({post_url})"
-                    await bot.send_alert(f"📊 Daily Service Summary - {today_str}", description, 0x3498db)
-                    state.last_summary_date = today_str
+            for r in reports:
+                if now.hour == r["hour"] and now.minute <= 5 and getattr(state, r["attr"]) != today_str:
+                    stats = r["func"]()
+                    if stats:
+                        url = bsky.send_skeet(r["fmt"](stats, "bluesky"))
+                        twitter.post_alert(r["fmt"](stats, "twitter"))
+                        if url:
+                            await bot.send_alert(f"📊 {r['label']}", f"🔗 [View on Bluesky]({url})", 0x3498db)
+                            setattr(state, r["attr"], today_str)
 
         except Exception as e:
             log.error(f"Loop Error: {e}", exc_info=True)
@@ -141,6 +125,7 @@ async def main():
     monitor = MBTAMonitor(db_manager=shared_db)
     reporter = Reporter(db_manager=shared_db)
     bsky = BlueskyClient()
+    twitter = TwitterClient() if Config.TWITTER_CONSUMER_KEY else None
     
     intents = discord.Intents.default()
     intents.message_content = True
@@ -149,10 +134,12 @@ async def main():
         db_manager=shared_db, 
         reporter=reporter, 
         monitor=monitor, 
+        bsky=bsky,      
+        twitter=twitter,
         intents=intents
     )
 
-    asyncio.create_task(monitor_loop(monitor, reporter, bot, bsky, shared_db, app_state))
+    asyncio.create_task(monitor_loop(monitor, reporter, bot, bsky, twitter, shared_db, app_state))
     
     log.info("Starting Discord Interface...")
     try:

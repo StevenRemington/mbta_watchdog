@@ -17,11 +17,15 @@ class WatchdogBot(discord.Client):
     Discord Bot interface for the MBTA Watchdog system.
     """
 
-    def __init__(self, db_manager: Optional[DatabaseManager] = None, reporter: Optional[Reporter] = None, monitor=None, *args, **kwargs):
+    def __init__(self, db_manager: Optional[DatabaseManager] = None, reporter: Optional[Reporter] = None, monitor=None, bsky=None, twitter=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.db = db_manager or DatabaseManager()
         self.reporter = reporter or Reporter(db_manager=self.db)
         self.monitor = monitor
+        
+        # Inject our social clients
+        self.bsky = bsky
+        self.twitter = twitter
         
         # Command Registry
         self.command_map = {
@@ -31,7 +35,8 @@ class WatchdogBot(discord.Client):
             '!feedback': self.cmd_feedback,
             '!health': self.cmd_health,
             '!analyze': self.cmd_analyze,
-            '!leaderboard': self.cmd_leaderboard
+            '!leaderboard': self.cmd_leaderboard,
+            '!test': self.cmd_test  # Register the new test command
         }
 
     async def on_ready(self):
@@ -57,7 +62,6 @@ class WatchdogBot(discord.Client):
             except Exception as e:
                 log.error(f"Error executing {command}: {e}", exc_info=True)
                 await message.channel.send("⚠️ An internal error occurred.")
-
     # =========================================================================
     # COMMAND HANDLERS
     # =========================================================================
@@ -67,15 +71,53 @@ class WatchdogBot(discord.Client):
         help_text = (
             "**🚆 MBTA Watchdog Help**\n"
             "```\n"
-            "!list           : Live board of all active trains\n"
-            "!status <num>   : Live status & next stop prediction (e.g., !status 508)\n"
-            "!analyze <num>  : 30-Day Performance Report Card for a train\n"
-            "!leaderboard    : The 'Wall of Shame' (Top 3 worst trains)\n"
-            "!feedback       : Generate a complaint email draft for the MBTA\n"
-            "!health         : Check system health and database connection\n"
+            "!list         : Live board of all active trains\n"
+            "!status <num> : Live status & next stop prediction (e.g., !status 508)\n"
+            "!analyze <num> : 30-Day Performance Report Card for a train\n"
+            "!leaderboard  : The 'Wall of Shame' (Top 3 worst trains)\n"
+            "!feedback     : Generate a complaint email draft for the MBTA\n"
+            "!health       : Check system health and database connection\n"
+            "!test         : Send a test broadcast to connected social media\n"
             "```"
         )
         await message.channel.send(help_text)
+
+    async def cmd_test(self, message: discord.Message, args: Optional[str]):
+        """Manual test command to verify social media posting logic."""
+        # Security check: Ensure only the bot owner can trigger this
+        if Config.DISCORD_OWNER_ID and message.author.id != Config.DISCORD_OWNER_ID:
+            await message.channel.send("❌ You do not have permission to run this command.")
+            return
+
+        test_msg = "🛠️ SYSTEM TEST: This is a manual test of the MBTA Watchdog alert system."
+        
+        # Ensure we have the clients
+        if not self.bsky or not self.twitter:
+            await message.channel.send("❌ Social media clients (Bluesky/Twitter) are not initialized in the bot.")
+            return
+
+        # 1. Generate platform-specific text using the reporter handles
+        bsky_text = f"{test_msg} {self.reporter._get_mbta_handle('bluesky')} #MBTATest"
+        twitter_text = f"{test_msg} {self.reporter._get_mbta_handle('twitter')} #MBTATest"
+
+        try:
+            # 2. Post to Socials
+            post_url = self.bsky.send_skeet(bsky_text)
+            self.twitter.post_alert(twitter_text)
+
+            # 3. Respond in Discord to confirm
+            if post_url:
+                embed = discord.Embed(
+                    title="✅ Test Broadcast Successful",
+                    description=f"Links:\n🔗 [Bluesky Post]({post_url})\n🐦 Twitter post sent successfully.",
+                    color=0x2ecc71
+                )
+                await message.channel.send(embed=embed)
+            else:
+                await message.channel.send("⚠️ Bluesky failed, but Twitter was attempted. Check logs.")
+
+        except Exception as e:
+            await message.channel.send(f"❌ Critical Error during test: {str(e)}")
     async def cmd_analyze(self, message: discord.Message, args: Optional[str]):
         """Generates a 30-day performance report card for a train."""
         if not args:

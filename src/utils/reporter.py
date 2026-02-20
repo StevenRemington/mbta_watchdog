@@ -29,6 +29,37 @@ class Reporter:
         return (f"\n   -> 🧾 HISTORY: Train {train_id} has failed {count} times in the last {days} days "
                 f"({', '.join(formatted_dates)}).")
 
+    def _get_mbta_handle(self, platform: str) -> str:
+        """Returns the correct MBTA handle based on the target platform."""
+        return "@mbta.com" if platform == "bluesky" else "@MBTA_CR"
+
+    def format_alert(self, row, condition: str, history_stats: list, platform: str = "bluesky") -> str:
+        """Formats the disruption alert text."""
+        tid = row['Train']
+        station = row['Station']
+        handle = self._get_mbta_handle(platform)
+        
+        history_text = ""
+        if history_stats and len(history_stats) > 1:
+            dates_str = ", ".join([datetime.strptime(d, '%Y-%m-%d').strftime('%m/%d') for d in history_stats])
+            history_text = f"\n\n🧾 HISTORY: Failed {len(history_stats)}x in last 7 days ({dates_str})."
+
+        if condition == "CANCELED":
+            return f"🚨 ALERT: MBTA Commuter Rail Train {tid} has been CANCELED at {station}.{history_text} {handle} #MBTA #WorcesterLine"
+        
+        delay = row.get('DelayMinutes', 0)
+        return f"⚠️ SEVERE DELAY: Train {tid} is running {delay} minutes late at {station}.{history_text} {handle} #MBTA #WorcesterLine"
+
+    def format_morning_grade(self, stats: dict, platform: str = "bluesky") -> str:
+        """Formats the morning commute report."""
+        handle = self._get_mbta_handle(platform)
+        return f"🌅 Morning Commute Grade: {stats['grade']}\nDetailed performance report for {handle} #MBTA"
+
+    def format_daily_summary(self, stats: dict, platform: str = "bluesky") -> str:
+        """Formats the daily summary report."""
+        handle = self._get_mbta_handle(platform)
+        return f"📊 Daily Service Summary for {datetime.now().strftime('%m/%d')}\nOverall performance for {handle} #MBTA"
+
     def generate_email(self, df_recent):
         """Generates the email draft text and returns it as a string."""
         bad_trains = []
