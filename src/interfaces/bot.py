@@ -4,6 +4,7 @@ import aiohttp
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from dateutil import parser
+import pandas as pd
 
 from database.database import DatabaseManager
 from utils.reporter import Reporter
@@ -91,33 +92,44 @@ class WatchdogBot(discord.Client):
 
         test_msg = "🛠️ SYSTEM TEST: This is a manual test of the MBTA Watchdog alert system."
         
-        # Ensure we have the clients
-        if not self.bsky or not self.twitter:
+        # Ensure we have at least one social media client initialized
+        if not self.bsky and not self.twitter:
             await message.channel.send("❌ Social media clients (Bluesky/Twitter) are not initialized in the bot.")
             return
 
-        # 1. Generate platform-specific text using the reporter handles
-        bsky_text = f"{test_msg} {self.reporter._get_mbta_handle('bluesky')} #MBTATest"
-        twitter_text = f"{test_msg} {self.reporter._get_mbta_handle('twitter')} #MBTATest"
-
         try:
-            # 2. Post to Socials
-            post_url = self.bsky.send_skeet(bsky_text)
-            self.twitter.post_alert(twitter_text)
+            bsky_url = None
+            twitter_url = None
 
-            # 3. Respond in Discord to confirm
-            if post_url:
+            # 1. Post to Socials
+            if self.bsky:
+                bsky_text = f"{test_msg} {self.reporter._get_mbta_handle('bluesky')} #MBTATest"
+                bsky_url = self.bsky.send_skeet(bsky_text)
+                
+            if self.twitter:
+                twitter_text = f"{test_msg} {self.reporter._get_mbta_handle('twitter')} #MBTATest"
+                twitter_url = self.twitter.post_alert(twitter_text)
+
+            # 2. Respond in Discord to confirm with dynamic links
+            if bsky_url or twitter_url:
+                links = []
+                if bsky_url:
+                    links.append(f"🔗 [Bluesky Post]({bsky_url})")
+                if twitter_url:
+                    links.append(f"🐦 [Twitter Post]({twitter_url})")
+
                 embed = discord.Embed(
                     title="✅ Test Broadcast Successful",
-                    description=f"Links:\n🔗 [Bluesky Post]({post_url})\n🐦 Twitter post sent successfully.",
+                    description="Links:\n" + "\n".join(links),
                     color=0x2ecc71
                 )
                 await message.channel.send(embed=embed)
             else:
-                await message.channel.send("⚠️ Bluesky failed, but Twitter was attempted. Check logs.")
+                await message.channel.send("⚠️ All social media posts failed. Check logs.")
 
         except Exception as e:
             await message.channel.send(f"❌ Critical Error during test: {str(e)}")
+
     async def cmd_analyze(self, message: discord.Message, args: Optional[str]):
         """Generates a 30-day performance report card for a train."""
         if not args:

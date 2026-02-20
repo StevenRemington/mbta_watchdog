@@ -61,18 +61,30 @@ async def process_alerts(bot, bsky, twitter, current_data, state: WatchdogState,
             history = db.get_failure_stats(tid)
             
             # 1. Post to Bluesky
-            bsky_text = reporter.format_alert(row, condition, history, platform="bluesky")
-            post_url = bsky.send_skeet(bsky_text)
+            bsky_url = None
+            if bsky:
+                bsky_text = reporter.format_alert(row, condition, history, platform="bluesky")
+                bsky_url = bsky.send_skeet(bsky_text)
             
             # 2. Post to Twitter
-            twitter_text = reporter.format_alert(row, condition, history, platform="twitter")
-            twitter.post_alert(twitter_text)
+            twitter_url = None
+            if twitter:
+                twitter_text = reporter.format_alert(row, condition, history, platform="twitter")
+                twitter_url = twitter.post_alert(twitter_text)
             
-            # 3. Mirror to Discord only if Bluesky succeeded (acting as the URL source)
-            if post_url:
+            # 3. Mirror to Discord only if at least one social post succeeded
+            if bsky_url or twitter_url:
                 title = f"🚨 Train {tid} CANCELED" if condition == "CANCELED" else f"⚠️ Major Delay: Train {tid}"
                 color = 0x000000 if condition == "CANCELED" else 0xFF0000
-                description = f"🔗 [View Alert on Bluesky]({post_url})"
+                
+                # Build the dynamic description with appropriate links
+                links = []
+                if bsky_url:
+                    links.append(f"🔗 [View Alert on Bluesky]({bsky_url})")
+                if twitter_url:
+                    links.append(f"🐦 [View Alert on X/Twitter]({twitter_url})")
+                
+                description = "\n".join(links)
                 await bot.send_alert(title, description, color)
             
             state.alert_history[tid] = condition
@@ -106,10 +118,18 @@ async def monitor_loop(monitor, reporter, bot, bsky, twitter, db, state: Watchdo
                 if now.hour == r["hour"] and now.minute <= 5 and getattr(state, r["attr"]) != today_str:
                     stats = r["func"]()
                     if stats:
-                        url = bsky.send_skeet(r["fmt"](stats, "bluesky"))
-                        twitter.post_alert(r["fmt"](stats, "twitter"))
-                        if url:
-                            await bot.send_alert(f"📊 {r['label']}", f"🔗 [View on Bluesky]({url})", 0x3498db)
+                        bsky_url = bsky.send_skeet(r["fmt"](stats, "bluesky")) if bsky else None
+                        twitter_url = twitter.post_alert(r["fmt"](stats, "twitter")) if twitter else None
+                        
+                        if bsky_url or twitter_url:
+                            links = []
+                            if bsky_url:
+                                links.append(f"🔗 [View on Bluesky]({bsky_url})")
+                            if twitter_url:
+                                links.append(f"🐦 [View on X/Twitter]({twitter_url})")
+                                
+                            description = "\n".join(links)
+                            await bot.send_alert(f"📊 {r['label']}", description, 0x3498db)
                             setattr(state, r["attr"], today_str)
 
         except Exception as e:

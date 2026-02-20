@@ -1,5 +1,5 @@
 import tweepy
-import logging
+from typing import Optional
 from utils.config import Config
 from utils.logger import get_logger
 
@@ -22,17 +22,24 @@ class TwitterClient:
             log.error(f"Failed to initialize Twitter Client: {e}")
             self.client = None
 
-    def post_alert(self, text: str):
+    def post_alert(self, text: str) -> Optional[str]:
         """Posts an alert to Twitter with error handling to prevent main loop crashes."""
         if not self.client:
             log.warning("Twitter client not initialized. Skipping post.")
-            return
+            return None
 
         try:
             # API v2 method to create a tweet
             response = self.client.create_tweet(text=text)
-            log.info(f"Successfully posted to Twitter. Tweet ID: {response.data['id']}")
+            tweet_id = response.data['id']
+            log.info(f"Successfully posted to Twitter. Tweet ID: {tweet_id}")
+            
+            # Return the direct link to the newly created tweet
+            return f"https://x.com/i/web/status/{tweet_id}"
+            
         except tweepy.errors.TweepyException as e:
             log.error(f"Tweepy error occurred: {e}")
+            return None
         except Exception as e:
             log.error(f"Unexpected error posting to Twitter: {e}")
+            return None
