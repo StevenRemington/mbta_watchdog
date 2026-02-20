@@ -237,38 +237,42 @@ class DatabaseManager:
     def get_train_analysis(self, train_id: str, days: int = 30):
         """
         Generates a 30-day performance report for a specific train.
-        Returns a dict with reliability %, avg delay, and worst day of week.
+        Fixed to calculate 'Per Trip' reliability consistently.
         """
         cutoff = datetime.now() - timedelta(days=days)
         conn = self._get_conn()
         
         try:
-            # 1. General Stats (Total runs, Lates, Cancels, Avg Delay)
-            # We use the Config threshold (5 mins) to define "Late"
+            # --- FIX: All metrics now count DISTINCT DATES (Trips) ---
             query_stats = """
                 SELECT 
-                    COUNT(*) as total,
-                    SUM(CASE WHEN status = 'CANCELED' THEN 1 ELSE 0 END) as canceled,
-                    SUM(CASE WHEN delay_minutes > ? AND status != 'CANCELED' THEN 1 ELSE 0 END) as late,
+                    COUNT(DISTINCT date(log_time)) as total_trips,
+                    
+                    COUNT(DISTINCT CASE 
+                        WHEN status = 'CANCELED' THEN date(log_time) 
+                    END) as canceled_days,
+                    
+                    COUNT(DISTINCT CASE 
+                        WHEN delay_minutes > ? AND status != 'CANCELED' THEN date(log_time) 
+                    END) as late_days,
+                    
                     AVG(delay_minutes) as avg_delay
                 FROM train_logs 
                 WHERE train_id = ? AND log_time >= ?
             """
             cursor = conn.cursor()
             cursor.execute(query_stats, (Config.DELAY_THRESHOLD, train_id, cutoff))
-            stats = cursor.fetchone() # returns tuple: (total, canceled, late, avg_delay)
+            stats = cursor.fetchone() 
             
             if not stats or stats[0] == 0:
                 return None
 
             total = stats[0]
-            canceled = stats[1] if stats[1] else 0
-            late = stats[2] if stats[2] else 0
+            canceled = stats[1] # Now represents "Days Canceled"
+            late = stats[2]     # Now represents "Days Late"
             avg_delay = stats[3] if stats[3] else 0
             
-            # 2. Worst Day Analysis
-            # SQLite strftime('%w') returns 0=Sunday, 1=Monday...
-            # We find the day with the highest average delay.
+            # Worst Day Analysis (Remains the same)
             query_days = """
                 SELECT 
                     strftime('%w', log_time) as dow,
@@ -287,9 +291,13 @@ class DatabaseManager:
                 days_map = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
                 worst_day_str = days_map[int(worst_day_row[0])]
 
-            # 3. Calculate Reliability Score
-            # Formula: (Total - Bad Outcomes) / Total
+            # Reliability Formula
+            # Now (Total Trips - Bad Trips) / Total Trips
             failures = (canceled + late)
+            
+            # Safety clamp to prevent negative numbers if a train is both Late AND Canceled same day
+            failures = min(failures, total) 
+            
             reliability = ((total - failures) / total) * 100
 
             return {
@@ -303,5 +311,42 @@ class DatabaseManager:
                 "late_count": late
             }
 
+        finally:
+            self._close_conn(conn)
+
+    def get_leaderboard_stats(self, days: int = 30):
+        """
+        Identifies the top 3 worst performing trains in the last 30 days.
+        """
+        cutoff = datetime.now() - timedelta(days=days)
+        conn = self._get_conn()
+        try:
+            # We rank by a "Misery Score": (Cancellations * 3) + (Major Delays * 1)
+            query = """
+                SELECT 
+                    train_id,
+                    SUM(CASE WHEN status = 'CANCELED' THEN 1 ELSE 0 END) as cancels,
+                    SUM(CASE WHEN delay_minutes > 15 THEN 1 ELSE 0 END) as major_delays,
+                    MAX(delay_minutes) as worst_delay
+                FROM train_logs
+                WHERE log_time >= ?
+                GROUP BY train_id
+                HAVING cancels > 0 OR major_delays > 0
+                ORDER BY (cancels * 3 + major_delays) DESC
+                LIMIT 3 
+            """
+            cursor = conn.cursor()
+            cursor.execute(query, (cutoff,))
+            rows = cursor.fetchall()
+            
+            results = []
+            for r in rows:
+                results.append({
+                    "train": r[0],
+                    "cancels": r[1],
+                    "major_lates": r[2],
+                    "max_delay": r[3]
+                })
+            return results
         finally:
             self._close_conn(conn)

@@ -30,7 +30,8 @@ class WatchdogBot(discord.Client):
             '!status': self.cmd_status,
             '!feedback': self.cmd_feedback,
             '!health': self.cmd_health,
-            '!analyze': self.cmd_analyze  # <--- NEW COMMAND
+            '!analyze': self.cmd_analyze,
+            '!leaderboard': self.cmd_leaderboard
         }
 
     async def on_ready(self):
@@ -66,14 +67,15 @@ class WatchdogBot(discord.Client):
         help_text = (
             "**🚆 MBTA Watchdog Help**\n"
             "```\n"
-            "!list          : Live board of active trains\n"
-            "!status <num>  : Live status & next stop prediction\n"
-            "!analyze <num> : 30-Day Performance Report Card\n"
-            "!feedback      : Generate a complaint email draft\n"
+            "!list           : Live board of all active trains\n"
+            "!status <num>   : Live status & next stop prediction (e.g., !status 508)\n"
+            "!analyze <num>  : 30-Day Performance Report Card for a train\n"
+            "!leaderboard    : The 'Wall of Shame' (Top 3 worst trains)\n"
+            "!feedback       : Generate a complaint email draft for the MBTA\n"
+            "!health         : Check system health and database connection\n"
             "```"
         )
         await message.channel.send(help_text)
-
     async def cmd_analyze(self, message: discord.Message, args: Optional[str]):
         """Generates a 30-day performance report card for a train."""
         if not args:
@@ -109,16 +111,15 @@ class WatchdogBot(discord.Client):
         
         embed.add_field(
             name="Incidents", 
-            value=f"🛑 **{stats['canceled_count']}** Canceled\n⚠️ **{stats['late_count']}** Major Delays", 
+            value=f"🛑 **{stats['canceled_count']}** Canceled\n⚠️ **{stats['late_count']}** Major Delayed Trips", 
             inline=False
         )
         
-        embed.set_footer(text=f"Based on {stats['total_runs']} data points.")
+        # Updated Footer Text
+        embed.set_footer(text=f"Based on {stats['total_runs']} trips.")
         
         await message.channel.send(embed=embed)
 
-    # ... [Keep existing cmd_health, cmd_feedback, cmd_list, cmd_status handlers] ...
-    
     async def cmd_health(self, message: discord.Message, args: Optional[str]):
         try:
             df = self._get_recent_data(minutes=15)
@@ -175,6 +176,42 @@ class WatchdogBot(discord.Client):
                 await message.channel.send(f"⚠️ Usage: `!status <num>`\nActive: {t_list}")
             else:
                 await message.channel.send("⚠️ Usage: `!status <num>` (No active trains)")
+
+    async def cmd_leaderboard(self, message: discord.Message, args: Optional[str]):
+        """Displays the Wall of Shame (Top 3 Worst trains of the month)."""
+        leaders = self.db.get_leaderboard_stats(days=30)
+        
+        if not leaders:
+            await message.channel.send("🏆 Amazing! No major delays or cancellations in the last 30 days.")
+            return
+
+        embed = discord.Embed(
+            title="🏆 Wall of Shame (Last 30 Days)",
+            description="The Top 3 most unreliable trains.",
+            color=0x2c3e50
+        )
+
+        medals = ["🥇", "🥈", "🥉"]
+
+        for i, row in enumerate(leaders):
+            if i >= 3: break 
+            
+            # Text generation
+            details = []
+            if row['cancels'] > 0: details.append(f"🚫 **{row['cancels']}** Cancel(s)")
+            
+            # UPDATED TEXT HERE:
+            if row['major_lates'] > 0: details.append(f"⚠️ **{row['major_lates']}** Major Delay Record(s)")
+            
+            stats_text = f"{' • '.join(details)}\n🐌 Max Delay: {row['max_delay']}m"
+            
+            embed.add_field(
+                name=f"{medals[i]} Train {row['train']}",
+                value=stats_text,
+                inline=False
+            )
+        
+        await message.channel.send(embed=embed)
 
     async def send_alert(self, title: str, description: str, color: int = 0xFF0000):
         if Config.DISCORD_ALERT_CHANNEL_ID == 0: return
