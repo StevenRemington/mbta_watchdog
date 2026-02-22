@@ -4,7 +4,7 @@ from datetime import datetime
 import sys
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Dict
+from typing import Dict, Any
 
 SRC_PATH = str(Path(__file__).resolve().parent / "src")
 if SRC_PATH not in sys.path: 
@@ -24,7 +24,8 @@ log = get_logger("Main")
 @dataclass
 class WatchdogState:
     """Holds the runtime state of the application."""
-    alert_history: Dict[str, str] = field(default_factory=dict)
+    # Updated: Now stores a dict with condition and delay to track worsening status
+    alert_history: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     last_summary_date: str = ""
     last_morning_report_date: str = ""
 
@@ -52,30 +53,56 @@ async def process_alerts(bot, bsky, twitter, current_data, state: WatchdogState,
         elif row['DelayMinutes'] >= Config.MAJOR_DELAY_THRESHOLD: 
             condition = "LATE_MAJOR"
         
-        last_cond = state.alert_history.get(tid, "NONE")
+        # Get the last known state for this train
+        last_state = state.alert_history.get(tid, {"condition": "NONE", "delay": 0})
+        last_cond = last_state.get("condition", "NONE")
+        last_delay = last_state.get("delay", 0)
 
-        # Logic Gate: Only post if status worsened
-        if (condition == "CANCELED" and last_cond != "CANCELED") or \
-           (condition == "LATE_MAJOR" and last_cond not in ["LATE_MAJOR", "CANCELED"]):
-            
+        needs_alert = False
+        is_update = False
+
+        # Logic Gate: Threshold-Based Updates
+        if condition == "CANCELED" and last_cond != "CANCELED":
+            needs_alert = True
+        elif condition == "LATE_MAJOR":
+            if last_cond not in ["LATE_MAJOR", "CANCELED"]:
+                # Initial severe delay alert
+                needs_alert = True
+            elif last_cond != "CANCELED" and row['DelayMinutes'] >= last_delay + 10:
+                # Delay worsened by at least 10 minutes (Threshold trigger)
+                needs_alert = True
+                is_update = True
+        
+        if needs_alert:
             history = db.get_failure_stats(tid)
             
             # 1. Post to Bluesky
             bsky_url = None
             if bsky:
-                bsky_text = reporter.format_alert(row, condition, history, platform="bluesky")
+                bsky_text = reporter.format_alert(
+                    row, condition, history, platform="bluesky", is_update=is_update, last_delay=last_delay
+                )
                 bsky_url = bsky.send_skeet(bsky_text)
             
             # 2. Post to Twitter
             twitter_url = None
             if twitter:
-                twitter_text = reporter.format_alert(row, condition, history, platform="twitter")
+                twitter_text = reporter.format_alert(
+                    row, condition, history, platform="twitter", is_update=is_update, last_delay=last_delay
+                )
                 twitter_url = twitter.post_alert(twitter_text)
             
             # 3. Mirror to Discord only if at least one social post succeeded
             if bsky_url or twitter_url:
-                title = f"🚨 Train {tid} CANCELED" if condition == "CANCELED" else f"⚠️ Major Delay: Train {tid}"
-                color = 0x000000 if condition == "CANCELED" else 0xFF0000
+                if condition == "CANCELED":
+                    title = f"🚨 Train {tid} CANCELED"
+                    color = 0x000000
+                elif is_update:
+                    title = f"📈 UPDATE: Worsening Delay for Train {tid}"
+                    color = 0xFF8C00 # Dark Orange for updates
+                else:
+                    title = f"⚠️ Major Delay: Train {tid}"
+                    color = 0xFF0000
                 
                 # Build the dynamic description with appropriate links
                 links = []
@@ -87,9 +114,10 @@ async def process_alerts(bot, bsky, twitter, current_data, state: WatchdogState,
                 description = "\n".join(links)
                 await bot.send_alert(title, description, color)
             
-            state.alert_history[tid] = condition
+            # Update the application state with the newly alerted delay
+            state.alert_history[tid] = {"condition": condition, "delay": row['DelayMinutes']}
 
-    # Cleanup logic
+    # Cleanup logic: Remove trains that are no longer active
     state.alert_history = {k: v for k, v in state.alert_history.items() if k in active_ids}
 
 async def monitor_loop(monitor, reporter, bot, bsky, twitter, db, state: WatchdogState):

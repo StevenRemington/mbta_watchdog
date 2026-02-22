@@ -111,12 +111,14 @@ class DatabaseManager:
         })
 
     def get_daily_summary_stats(self):
-        """Aggregates stats for the current calendar day."""
+        """Aggregates comprehensive stats for the current calendar day."""
         today = datetime.now().strftime('%Y-%m-%d')
         query = "SELECT * FROM train_logs WHERE log_time >= ?"
         conn = self._get_conn()
-        df = pd.read_sql_query(query, conn, params=(today,))
-        self._close_conn(conn)
+        try:
+            df = pd.read_sql_query(query, conn, params=(today,))
+        finally:
+            self._close_conn(conn)
         
         if df.empty: return None
 
@@ -127,25 +129,28 @@ class DatabaseManager:
         }).reset_index()
 
         total = len(daily_trains)
-        affected = daily_trains[
-            (daily_trains['delay_minutes'] > Config.DELAY_THRESHOLD) | 
-            (daily_trains['status'] == 'CANCELED')
-        ]
-        affected_count = len(affected)
+        if total == 0: return None
+
+        # Calculate concrete impact statistics
+        late_trains = daily_trains[daily_trains['delay_minutes'] > Config.DELAY_THRESHOLD]
+        late_count = len(late_trains)
+        canceled_count = len(daily_trains[daily_trains['status'] == 'CANCELED'])
         
-        # Biggest delay logic
+        avg_delay = round(late_trains['delay_minutes'].mean(), 1) if late_count > 0 else 0
+        
         max_idx = daily_trains['delay_minutes'].idxmax()
         worst_train = daily_trains.loc[max_idx]
 
         return {
-            "date": today,
-            "total": total,
-            "affected_count": affected_count,
-            "percent_affected": (affected_count / total * 100) if total > 0 else 0,
-            "max_train": worst_train['train_id'],
-            "max_delay": worst_train['delay_minutes']
+            "date": datetime.now().strftime('%m/%d/%Y'),
+            "total_tracked": total,
+            "late_count": late_count,
+            "canceled_count": canceled_count,
+            "percent_affected": round(((late_count + canceled_count) / total) * 100, 1),
+            "avg_delay_mins": avg_delay,
+            "worst_train": worst_train['train_id'],
+            "worst_delay": worst_train['delay_minutes']
         }
-
     def get_failure_stats(self, train_id: str, days: int = 7, delay_threshold: int = 5) -> list:
         """
         Returns a list of dates (str) where the train failed (Late or Canceled).
@@ -181,9 +186,8 @@ class DatabaseManager:
         return bad_dates
     
     def get_morning_commute_stats(self):
-        """Aggregates stats for the morning rush (6 AM - 10 AM) and assigns a grade."""
+        """Aggregates stats for the morning rush (6 AM - 10 AM)."""
         now = datetime.now()
-        # Define the 6:00 AM to 10:00 AM window for TODAY
         start_str = now.replace(hour=6, minute=0, second=0, microsecond=0).strftime('%Y-%m-%d %H:%M:%S')
         end_str = now.replace(hour=10, minute=0, second=0, microsecond=0).strftime('%Y-%m-%d %H:%M:%S')
         
@@ -197,7 +201,7 @@ class DatabaseManager:
         if df.empty: 
             return None
 
-        # Group by Train ID to find the worst status for each unique train
+        # Analyze unique trains by their worst performance in the morning
         daily_trains = df.groupby('train_id').agg({
             'delay_minutes': 'max',
             'status': lambda x: 'CANCELED' if 'CANCELED' in x.values else 'ACTIVE'
@@ -206,30 +210,24 @@ class DatabaseManager:
         total = len(daily_trains)
         if total == 0: return None
 
-        # Calculate Metrics
-        late_count = len(daily_trains[daily_trains['delay_minutes'] > Config.DELAY_THRESHOLD])
+        # Calculate concrete impact statistics
+        late_trains = daily_trains[daily_trains['delay_minutes'] > Config.DELAY_THRESHOLD]
+        late_count = len(late_trains)
         canceled_count = len(daily_trains[daily_trains['status'] == 'CANCELED'])
-        on_time = total - late_count - canceled_count
         
-        # Grading Logic (Strict Curve)
-        # 90%+ = A, 80% = B, 70% = C, 60% = D, <60% = F
-        score = (on_time / total) * 100
-        if score >= 90: grade = "A"
-        elif score >= 80: grade = "B"
-        elif score >= 70: grade = "C"
-        elif score >= 60: grade = "D"
-        else: grade = "F"
-
-        # Find the Worst Offender
+        # Average delay among the trains that were late
+        avg_delay = round(late_trains['delay_minutes'].mean(), 1) if late_count > 0 else 0
+        
         max_idx = daily_trains['delay_minutes'].idxmax()
         worst_train = daily_trains.loc[max_idx]
 
         return {
-            "date": now.strftime('%Y-%m-%d'),
-            "total": total,
-            "late": late_count,
-            "canceled": canceled_count,
-            "grade": grade,
+            "date": now.strftime('%m/%d/%Y'),
+            "total_tracked": total,
+            "late_count": late_count,
+            "canceled_count": canceled_count,
+            "percent_affected": round(((late_count + canceled_count) / total) * 100, 1),
+            "avg_delay_mins": avg_delay,
             "worst_train": worst_train['train_id'],
             "worst_delay": worst_train['delay_minutes']
         }

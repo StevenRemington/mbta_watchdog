@@ -16,7 +16,6 @@ class Reporter:
 
     def _get_receipt(self, train_id: str, days: int = 7):
         """Generates a history of failures using the database's aggregation logic."""
-        # NEW: Call the DB method we created in Step 2
         bad_dates = self.db.get_failure_stats(train_id, days=days)
         
         count = len(bad_dates)
@@ -33,11 +32,12 @@ class Reporter:
         """Returns the correct MBTA handle based on the target platform."""
         return "@mbta.com" if platform == "bluesky" else "@MBTA_CR"
 
-    def format_alert(self, row, condition: str, history_stats: list, platform: str = "bluesky") -> str:
+    def format_alert(self, row, condition: str, history_stats: list, platform: str = "bluesky", is_update: bool = False, last_delay: int = 0) -> str:
         """Formats the disruption alert text."""
         tid = row['Train']
         station = row['Station']
         handle = self._get_mbta_handle(platform)
+        delay = row.get('DelayMinutes', 0)
         
         history_text = ""
         if history_stats and len(history_stats) > 1:
@@ -47,19 +47,51 @@ class Reporter:
         if condition == "CANCELED":
             return f"🚨 ALERT: MBTA Commuter Rail Train {tid} has been CANCELED at {station}.{history_text} {handle} #MBTA #WorcesterLine"
         
-        delay = row.get('DelayMinutes', 0)
+        # New Update logic for worsening delays
+        if is_update:
+            return f"📈 UPDATE: Train {tid} delays have worsened. Now running {delay} minutes late at {station} (previously {last_delay} min).{history_text} {handle} #MBTA #WorcesterLine"
+        
         return f"⚠️ SEVERE DELAY: Train {tid} is running {delay} minutes late at {station}.{history_text} {handle} #MBTA #WorcesterLine"
 
     def format_morning_grade(self, stats: dict, platform: str = "bluesky") -> str:
-        """Formats the morning commute report."""
+        """Formats the morning commute report optimized for 280-character limits."""
+        if not stats:
+            return f"🌅 Morning Commute: No data available. {self._get_mbta_handle(platform)} #MBTA"
+
         handle = self._get_mbta_handle(platform)
-        return f"🌅 Morning Commute Grade: {stats['grade']}\nDetailed performance report for {handle} #MBTA"
+        
+        # Highly condensed format (~170 chars max)
+        msg = (
+            f"🌅 MBTA Morning Commute ({stats['date']})\n\n"
+            f"🚆 Tracked: {stats['total_tracked']} Worcester Line trains\n"
+            f"⚠️ Impact: {stats['percent_affected']}% delayed or canceled\n"
+        )
+        
+        if stats['worst_delay'] > 0:
+            msg += f"🐌 Worst: Train {stats['worst_train']} ({stats['worst_delay']}m late)\n"
+        else:
+            msg += "✅ Status: No major delays!\n"
+            
+        msg += f"\n{handle} #MBTA #WorcesterLine"
+        return msg
 
     def format_daily_summary(self, stats: dict, platform: str = "bluesky") -> str:
-        """Formats the daily summary report."""
-        handle = self._get_mbta_handle(platform)
-        return f"📊 Daily Service Summary for {datetime.now().strftime('%m/%d')}\nOverall performance for {handle} #MBTA"
+        """Formats the daily summary report optimized for 280-character limits."""
+        if not stats:
+            return f"📊 Daily Summary: No data collected today. {self._get_mbta_handle(platform)} #MBTA"
 
+        handle = self._get_mbta_handle(platform)
+        
+        # Highly condensed format (~210 chars max)
+        msg = (
+            f"📊 MBTA Day in Review ({stats['date']})\n\n"
+            f"📈 Tracked: {stats['total_tracked']} trains\n"
+            f"🛑 Issues: {stats['canceled_count']} Canceled, {stats['late_count']} Major Delays\n"
+            f"⏱️ Avg Delay: {stats['avg_delay_mins']} mins (late trains only)\n"
+            f"🐌 Slowest: Train {stats['worst_train']} ({stats['worst_delay']}m late)\n\n"
+            f"{handle} #MBTA"
+        )
+        return msg
     def generate_email(self, df_recent):
         """Generates the email draft text and returns it as a string."""
         bad_trains = []
