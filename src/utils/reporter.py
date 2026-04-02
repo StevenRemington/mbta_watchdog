@@ -53,18 +53,27 @@ class Reporter:
         
         return f"⚠️ SEVERE DELAY: Train {tid} is running {delay} minutes late at {station}.{history_text} {handle} #MBTA #WorcesterLine"
 
+    def _calculate_grade(self, percent_affected: float) -> tuple:
+        """Determines the letter grade and emoji icon based on affected percentage."""
+        if percent_affected < 5: return ("A", "🟢")
+        if percent_affected < 15: return ("B", "🟢")
+        if percent_affected < 30: return ("C", "🟡")
+        if percent_affected < 50: return ("D", "🔴")
+        return ("F", "💀")
+
     def format_morning_grade(self, stats: dict, platform: str = "bluesky") -> str:
-        """Formats the morning commute report optimized for 280-character limits."""
+        """Formats the morning commute report with a calculated letter grade."""
         if not stats:
             return f"🌅 Morning Commute: No data available. {self._get_mbta_handle(platform)} #MBTA"
 
         handle = self._get_mbta_handle(platform)
+        grade, icon = self._calculate_grade(stats['percent_affected'])
         
-        # Highly condensed format (~170 chars max)
         msg = (
-            f"🌅 MBTA Morning Commute ({stats['date']})\n\n"
+            f"🌅 MBTA Morning Report ({stats['date']})\n\n"
+            f"{icon} Grade: **{grade}**\n"
             f"🚆 Tracked: {stats['total_tracked']} Worcester Line trains\n"
-            f"⚠️ Impact: {stats['percent_affected']}% delayed or canceled\n"
+            f"⚠️ Impact: {stats['percent_affected']}% delayed/canceled\n"
         )
         
         if stats['worst_delay'] > 0:
