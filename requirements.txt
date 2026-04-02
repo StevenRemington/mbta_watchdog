@@ -6,3 +6,5 @@ pytest
 pytest-asyncio
 atproto
 tweepy
+fastapi
+uvicorn

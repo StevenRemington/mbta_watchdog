@@ -1,16 +1,19 @@
+import sys
 import asyncio
 import discord
-from datetime import datetime
-import sys
 from pathlib import Path
+from datetime import datetime
 from dataclasses import dataclass, field
 from typing import Dict, Any
 
-# Ensure absolute imports work from the src directory
-SRC_PATH = str(Path(__file__).resolve().parent / "src")
-if SRC_PATH not in sys.path: 
+# 1. Path resolution for subdirectories
+ROOT_DIR = Path(__file__).resolve().parent.parent
+SRC_PATH = str(ROOT_DIR / "src")
+
+if SRC_PATH not in sys.path:
     sys.path.insert(0, SRC_PATH)
 
+# 2. Project-specific imports
 from utils.config import Config
 from utils.logger import get_logger
 from utils.reporter import Reporter
