@@ -32,11 +32,12 @@ mbta_watchdog/
 ├── data/               # SQLite database & auto-generated drafts
 ├── logs/               # Application runtime logs
 ├── src/                # Modular Source Code
-│   ├── api/            # MBTA API monitoring & data ingestion
-│   ├── interfaces/        # Bot logic, commands, and alert systems
+│   ├── api/            # MBTA API interaction & data ingestion
+│   ├── interfaces/     # Bot logic, commands, and alert systems
 │   ├── database/       # SQLite schema & persistence logic
 │   └── utils/          # Config, Logger, and Reporting helpers
 ├── main.py             # Application Orchestrator
+├── migrate_csv_to_db.py # One-time script to migrate legacy CSV data
 ├── requirements.txt    # Project dependencies
 └── .env                # Private Secrets (Ignored by Git)
 ```
